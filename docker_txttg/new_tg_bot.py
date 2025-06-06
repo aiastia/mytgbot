@@ -50,6 +50,7 @@ conn.close()
 
 ADMIN_USER_ID = [int(x) for x in os.environ.get('ADMIN_USER_ID', '12345678').split(',') if x.strip().isdigit()]
 print(f"Admin User IDs: {ADMIN_USER_ID}")
+
 # 检查并升级 files 表结构，添加 file_size 字段（如无）
 def upgrade_files_table():
     conn = sqlite3.connect(DB_PATH)
