@@ -48,6 +48,8 @@ c.execute('''CREATE TABLE IF NOT EXISTS file_feedback (
 conn.commit()
 conn.close()
 
+ADMIN_USER_ID = [int(x) for x in os.environ.get('ADMIN_USER_ID', '12345678').split(',') if x.strip().isdigit()]
+print(f"Admin User IDs: {ADMIN_USER_ID}")
 # 文件表操作
 
 def get_or_create_file(file_path, tg_file_id=None):
@@ -104,13 +106,46 @@ def get_today_sent_count(user_id):
     conn.close()
     return count
 
-def get_all_txt_files():
+def reload_txt_files():
+    """扫描TXT_ROOT下所有txt文件，插入到数据库files表（已存在则跳过）"""
     txt_files = []
     for root, dirs, files in os.walk(TXT_ROOT):
         for file in files:
-            if file.endswith('.txt'):
+            if file.endswith('.pdf') or file.endswith('.txt'):
                 txt_files.append(os.path.join(root, file))
-    return txt_files
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    inserted, skipped = 0, 0
+    for file_path in txt_files:
+        try:
+            c.execute('INSERT OR IGNORE INTO files (file_path) VALUES (?)', (file_path,))
+            if c.rowcount:
+                inserted += 1
+            else:
+                skipped += 1
+        except Exception:
+            skipped += 1
+    conn.commit()
+    conn.close()
+    return inserted, skipped
+
+def get_all_txt_files():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT file_path FROM files')
+    files = [row[0] for row in c.fetchall()]
+    conn.close()
+    return files
+
+# 记录反馈
+def record_feedback(user_id, file_id, feedback):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    date = datetime.now().strftime('%Y-%m-%d')
+    c.execute('''INSERT OR REPLACE INTO file_feedback (user_id, file_id, feedback, date)
+                 VALUES (?, ?, ?, ?)''', (user_id, file_id, feedback, date))
+    conn.commit()
+    conn.close()
 
 def get_unsent_files(user_id):
     all_files = get_all_txt_files()
@@ -129,16 +164,6 @@ def get_unsent_files(user_id):
             unsent.append(file_path)
     conn.close()
     return unsent
-
-# 记录反馈
-def record_feedback(user_id, file_id, feedback):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    date = datetime.now().strftime('%Y-%m-%d')
-    c.execute('''INSERT OR REPLACE INTO file_feedback (user_id, file_id, feedback, date)
-                 VALUES (?, ?, ?, ?)''', (user_id, file_id, feedback, date))
-    conn.commit()
-    conn.close()
 
 async def send_random_txt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -283,12 +308,22 @@ async def feedback_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 raise
 
+from telegram.ext import CommandHandler
+async def reload_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_USER_ID:
+        await update.message.reply_text('无权限，仅管理员可用。')
+        return
+    inserted, skipped = reload_txt_files()
+    await update.message.reply_text(f'刷新完成，新增 {inserted} 个文件，跳过 {skipped} 个已存在。')
+
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler('random', send_random_txt))
     app.add_handler(CommandHandler('stats', stats))
     app.add_handler(CommandHandler('hot', hot))
     app.add_handler(CommandHandler('getfile', getfile))
+    app.add_handler(CommandHandler('reload', reload_command))
     app.add_handler(CallbackQueryHandler(feedback_callback, pattern=r'^feedback\\|'))
     app.run_polling()
 
