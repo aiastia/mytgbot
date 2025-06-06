@@ -50,6 +50,17 @@ conn.close()
 
 ADMIN_USER_ID = [int(x) for x in os.environ.get('ADMIN_USER_ID', '12345678').split(',') if x.strip().isdigit()]
 print(f"Admin User IDs: {ADMIN_USER_ID}")
+# 检查并升级 files 表结构，添加 file_size 字段（如无）
+def upgrade_files_table():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("PRAGMA table_info(files)")
+    columns = [row[1] for row in c.fetchall()]
+    if 'file_size' not in columns:
+        c.execute("ALTER TABLE files ADD COLUMN file_size INTEGER")
+        conn.commit()
+    conn.close()
+
 # 文件表操作
 
 def get_or_create_file(file_path, tg_file_id=None):
@@ -64,7 +75,12 @@ def get_or_create_file(file_path, tg_file_id=None):
             conn.commit()
         conn.close()
         return file_id
-    c.execute('INSERT INTO files (file_path, tg_file_id) VALUES (?, ?)', (file_path, tg_file_id))
+    # 新增时插入文件大小
+    try:
+        file_size = os.path.getsize(file_path)
+    except Exception:
+        file_size = None
+    c.execute('INSERT INTO files (file_path, tg_file_id, file_size) VALUES (?, ?, ?)', (file_path, tg_file_id, file_size))
     conn.commit()
     file_id = c.lastrowid
     conn.close()
@@ -107,7 +123,8 @@ def get_today_sent_count(user_id):
     return count
 
 def reload_txt_files():
-    """扫描TXT_ROOT下所有txt文件，插入到数据库files表（已存在则跳过）"""
+    """扫描TXT_ROOT下所有txt/pdf文件，插入到数据库files表（已存在则跳过），并维护文件大小"""
+    upgrade_files_table()
     txt_files = []
     for root, dirs, files in os.walk(TXT_ROOT):
         for file in files:
@@ -118,11 +135,14 @@ def reload_txt_files():
     inserted, skipped = 0, 0
     for file_path in txt_files:
         try:
-            c.execute('INSERT OR IGNORE INTO files (file_path) VALUES (?)', (file_path,))
-            if c.rowcount:
-                inserted += 1
-            else:
+            file_size = os.path.getsize(file_path)
+            c.execute('INSERT OR IGNORE INTO files (file_path, file_size) VALUES (?, ?)', (file_path, file_size))
+            if c.rowcount == 0:
+                # 已存在则尝试更新文件大小
+                c.execute('UPDATE files SET file_size=? WHERE file_path=?', (file_size, file_path))
                 skipped += 1
+            else:
+                inserted += 1
         except Exception:
             skipped += 1
     conn.commit()
