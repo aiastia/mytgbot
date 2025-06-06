@@ -9,6 +9,7 @@ services:
     environment:
       - TZ=Asia/Shanghai
       - BOT_TOKEN=${BOT_TOKEN}
+      - ADMIN_IDS=123456789
     logging:
       options:
         max-size: "10m"
