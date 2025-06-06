@@ -3,7 +3,7 @@ version: '3.8'
 services:
   newtg:
     build: .
-    image: aiastia/mytgbot:code
+    image: aiastia/mytgbot:txt
     container_name: newtg
     volumes:
       - ./data:/app/data/

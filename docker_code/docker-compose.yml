@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   tgpattern:
-    image: aiastia/mytgbot:txt
+    image: aiastia/mytgbot:code
     volumes:
       - ./data:/app/data/
     restart: unless-stopped    
