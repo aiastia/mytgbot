@@ -108,7 +108,7 @@ def get_all_txt_files():
     txt_files = []
     for root, dirs, files in os.walk(TXT_ROOT):
         for file in files:
-            if file.endswith('.pdf'):
+            if file.endswith('.txt'):
                 txt_files.append(os.path.join(root, file))
     return txt_files
 
