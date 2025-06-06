@@ -2,9 +2,7 @@ version: '3.8'
 
 services:
   newtg:
-    build: .
     image: aiastia/mytgbot:txt
-    container_name: newtg
     volumes:
       - ./data:/app/data/
       - ./share_folder:/app/share_folder:ro
