@@ -11,6 +11,7 @@ load_dotenv()
 TOKEN = os.getenv('BOT_TOKEN')
 TXT_ROOT = os.getenv('TXT_ROOT', '/app/share_folder')
 DB_PATH = './data/sent_files.db'
+TXT_EXTS = [x.strip() for x in os.getenv('TXT_EXTS', '.txt,.pdf').split(',') if x.strip()]
 
 # 数据库初始化
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -18,7 +19,9 @@ conn = sqlite3.connect(DB_PATH)
 c = conn.cursor()
 # users表
 c.execute('''CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY
+    user_id INTEGER PRIMARY KEY,
+    vip_level INTEGER DEFAULT 0,
+    vip_date TEXT
 )''')
 # files表
 c.execute('''CREATE TABLE IF NOT EXISTS files (
@@ -96,6 +99,34 @@ def ensure_user(user_id):
     conn.commit()
     conn.close()
 
+def set_user_vip_level(user_id, vip_level):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    vip_date = datetime.now().strftime('%Y-%m-%d') if vip_level > 0 else None
+    if vip_level > 0:
+        c.execute('UPDATE users SET vip_level=?, vip_date=? WHERE user_id=?', (vip_level, vip_date, user_id))
+    else:
+        c.execute('UPDATE users SET vip_level=0, vip_date=NULL WHERE user_id=?', (user_id,))
+    conn.commit()
+    conn.close()
+
+def get_user_daily_limit(user_id):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT vip_level FROM users WHERE user_id=?', (user_id,))
+    row = c.fetchone()
+    conn.close()
+    level = row[0] if row else 0
+    # 你可以自定义不同等级的领取上限
+    if level == 3:
+        return 100
+    elif level == 2:
+        return 50
+    elif level == 1:
+        return 30
+    else:
+        return 10
+
 # sent_files表操作
 
 def get_sent_file_ids(user_id):
@@ -129,7 +160,7 @@ def reload_txt_files():
     txt_files = []
     for root, dirs, files in os.walk(TXT_ROOT):
         for file in files:
-            if file.endswith('.pdf') or file.endswith('.txt'):
+            if any(file.endswith(ext) for ext in TXT_EXTS):
                 txt_files.append(os.path.join(root, file))
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -189,47 +220,68 @@ def get_unsent_files(user_id):
 async def send_random_txt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     ensure_user(user_id)
-    if get_today_sent_count(user_id) >= 10:
-        await update.message.reply_text('每天最多只能领取10本，明天再来吧！')
+    daily_limit = get_user_daily_limit(user_id)
+    if get_today_sent_count(user_id) >= daily_limit:
+        await update.message.reply_text(f'每天最多只能领取{daily_limit}本，明天再来吧！')
         return
     unsent_files = get_unsent_files(user_id)
     if not unsent_files:
         await update.message.reply_text('你已经收到了所有文件！')
         return
     file_path = random.choice(unsent_files)
-    # 只发送一次文件，带按钮和caption
+    ext = os.path.splitext(file_path)[1].lower()
+    image_exts = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
     with open(file_path, 'rb') as f:
-        # 评分按钮，初始无高亮
+        if ext == '.mp4':
+            msg = await update.message.reply_video(
+                f,
+                caption="正在生成文件ID..."
+            )
+            tg_file_id = msg.video.file_id
+        elif ext in image_exts:
+            msg = await update.message.reply_photo(
+                f,
+                caption="正在生成文件ID..."
+            )
+            tg_file_id = msg.photo[-1].file_id if msg.photo else None
+        else:
+            keyboard = [
+                [
+                    InlineKeyboardButton("👍", callback_data=f"feedback|{{file_id}}|1"),
+                    InlineKeyboardButton("👎", callback_data=f"feedback|{{file_id}}|-1"),
+                ]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            msg = await update.message.reply_document(
+                f,
+                caption="正在生成文件ID...",
+                reply_markup=reply_markup
+            )
+            tg_file_id = msg.document.file_id
+    file_id = get_or_create_file(file_path, tg_file_id)
+    mark_file_sent(user_id, file_id)
+    if ext == '.mp4' or ext in image_exts:
+        try:
+            await msg.edit_caption(
+                caption=f"文件tg_file_id: {tg_file_id}"
+            )
+        except Exception:
+            pass
+    else:
         keyboard = [
             [
-                InlineKeyboardButton("👍", callback_data=f"feedback|{{file_id}}|1"),
-                InlineKeyboardButton("👎", callback_data=f"feedback|{{file_id}}|-1"),
+                InlineKeyboardButton("👍", callback_data=f"feedback|{file_id}|1"),
+                InlineKeyboardButton("👎", callback_data=f"feedback|{file_id}|-1"),
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        msg = await update.message.reply_document(
-            f,
-            caption="正在生成文件ID...",
-            reply_markup=reply_markup
-        )
-    tg_file_id = msg.document.file_id
-    file_id = get_or_create_file(file_path, tg_file_id)
-    mark_file_sent(user_id, file_id)
-    # 发送后立即更新caption和按钮（防止file_id为None）
-    keyboard = [
-        [
-            InlineKeyboardButton("👍", callback_data=f"feedback|{file_id}|1"),
-            InlineKeyboardButton("👎", callback_data=f"feedback|{file_id}|-1"),
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    try:
-        await msg.edit_caption(
-            caption=f"文件tg_file_id: {tg_file_id}",
-            reply_markup=reply_markup
-        )
-    except Exception:
-        pass
+        try:
+            await msg.edit_caption(
+                caption=f"文件tg_file_id: {tg_file_id}",
+                reply_markup=reply_markup
+            )
+        except Exception:
+            pass
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -338,6 +390,46 @@ async def reload_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     inserted, skipped = reload_txt_files()
     await update.message.reply_text(f'刷新完成，新增 {inserted} 个文件，跳过 {skipped} 个已存在。')
 
+# 新增命令：设置用户VIP
+async def setvip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_USER_ID:
+        await update.message.reply_text('无权限，仅管理员可用。')
+        return
+    if len(context.args) != 2:
+        await update.message.reply_text('用法：/setvip <user_id> <0/1>')
+        return
+    try:
+        target_id = int(context.args[0])
+        vip = int(context.args[1])
+        if vip not in (0, 1):
+            raise ValueError
+    except Exception:
+        await update.message.reply_text('参数错误。')
+        return
+    set_user_vip(target_id, vip)
+    await update.message.reply_text(f'用户 {target_id} VIP 状态已设置为 {vip}')
+
+# 新增命令：设置用户VIP等级
+async def setviplevel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_USER_ID:
+        await update.message.reply_text('无权限，仅管理员可用。')
+        return
+    if len(context.args) != 2:
+        await update.message.reply_text('用法：/setviplevel <user_id> <level> (0=普通, 1=vip1, 2=vip2, 3=vip3)')
+        return
+    try:
+        target_id = int(context.args[0])
+        level = int(context.args[1])
+        if level not in (0, 1, 2, 3):
+            raise ValueError
+    except Exception:
+        await update.message.reply_text('参数错误。')
+        return
+    set_user_vip_level(target_id, level)
+    await update.message.reply_text(f'用户 {target_id} VIP 等级已设置为 {level}')
+
 def main():
     base_url = os.getenv('TELEGRAM_API_URL')
     builder = ApplicationBuilder().token(TOKEN)
@@ -349,6 +441,7 @@ def main():
     app.add_handler(CommandHandler('hot', hot))
     app.add_handler(CommandHandler('getfile', getfile))
     app.add_handler(CommandHandler('reload', reload_command))
+    app.add_handler(CommandHandler('setviplevel', setviplevel_command))
     app.add_handler(CallbackQueryHandler(feedback_callback, pattern=r'^feedback\\|'))
     app.run_polling()
 
