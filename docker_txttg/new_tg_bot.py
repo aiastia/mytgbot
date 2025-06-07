@@ -65,6 +65,19 @@ def upgrade_files_table():
         conn.commit()
     conn.close()
 
+# 检查并升级 users 表结构，添加 vip_level 和 vip_date 字段（如无）
+def upgrade_users_table():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("PRAGMA table_info(users)")
+    columns = [row[1] for row in c.fetchall()]
+    if 'vip_level' not in columns:
+        c.execute("ALTER TABLE users ADD COLUMN vip_level INTEGER DEFAULT 0")
+    if 'vip_date' not in columns:
+        c.execute("ALTER TABLE users ADD COLUMN vip_date TEXT")
+    conn.commit()
+    conn.close()
+
 # 文件表操作
 
 def get_or_create_file(file_path, tg_file_id=None):
@@ -407,7 +420,7 @@ async def setvip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         await update.message.reply_text('参数错误。')
         return
-    set_user_vip(target_id, vip)
+    set_user_vip_level(target_id, vip)
     await update.message.reply_text(f'用户 {target_id} VIP 状态已设置为 {vip}')
 
 # 新增命令：设置用户VIP等级
@@ -431,6 +444,7 @@ async def setviplevel_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text(f'用户 {target_id} VIP 等级已设置为 {level}')
 
 def main():
+    upgrade_users_table()  # 启动时自动升级users表结构
     base_url = os.getenv('TELEGRAM_API_URL')
     builder = ApplicationBuilder().token(TOKEN)
     if base_url:
