@@ -189,8 +189,8 @@ def get_unsent_files(user_id):
 async def send_random_txt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     ensure_user(user_id)
-    if get_today_sent_count(user_id) >= 5:
-        await update.message.reply_text('每天最多只能领取5本，明天再来吧！')
+    if get_today_sent_count(user_id) >= 10:
+        await update.message.reply_text('每天最多只能领取10本，明天再来吧！')
         return
     unsent_files = get_unsent_files(user_id)
     if not unsent_files:
@@ -339,7 +339,11 @@ async def reload_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f'刷新完成，新增 {inserted} 个文件，跳过 {skipped} 个已存在。')
 
 def main():
-    app = ApplicationBuilder().token(TOKEN).build()
+    base_url = os.getenv('TELEGRAM_API_URL')
+    builder = ApplicationBuilder().token(TOKEN)
+    if base_url:
+        builder = builder.base_url(f"{base_url}/bot").base_file_url(f"{base_url}/file/bot")
+    app = builder.build()
     app.add_handler(CommandHandler('random', send_random_txt))
     app.add_handler(CommandHandler('stats', stats))
     app.add_handler(CommandHandler('hot', hot))

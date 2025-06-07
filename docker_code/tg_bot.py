@@ -8,9 +8,19 @@ from functools import wraps
 from telegram import Update
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, MessageHandler, filters, CallbackContext
 
+# 加载.env文件（如果存在）
+env_path = Path('.env')
+if env_path.exists():
+    print("从.env文件加载配置...")
+    with env_path.open() as f:
+        for line in f:
+            if line.strip() and not line.startswith('#'):
+                key, value = line.strip().split('=', 1)
+                os.environ[key] = value
+
 # 管理员ID列表
 ADMIN_IDS = [int(x) for x in os.environ.get('ADMIN_IDS', '12345678').split(',') if x.strip().isdigit()]
-
+print(f"管理员ID列表: {ADMIN_IDS}")
 # 管理员权限检查装饰器
 def admin_only(func):
     @wraps(func)
@@ -21,16 +31,6 @@ def admin_only(func):
             return
         return await func(update, context, *args, **kwargs)
     return wrapped
-
-# 加载.env文件（如果存在）
-env_path = Path('.env')
-if env_path.exists():
-    print("从.env文件加载配置...")
-    with env_path.open() as f:
-        for line in f:
-            if line.strip() and not line.startswith('#'):
-                key, value = line.strip().split('=', 1)
-                os.environ[key] = value
 
 # 初始化 SQLite 数据库
 conn = sqlite3.connect('./data/messages.db', check_same_thread=False)
@@ -336,6 +336,7 @@ async def get_user_messages(update: Update, context: CallbackContext) -> None:
 def main():
     # 从环境变量获取 Bot Token
     bot_token = os.environ.get('BOT_TOKEN')
+    print(f"使用的 BOT_TOKEN: {bot_token}")
     if not bot_token:
         print("错误：未设置 BOT_TOKEN 环境变量")
         return
