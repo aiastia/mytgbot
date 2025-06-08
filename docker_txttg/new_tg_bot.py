@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from search_file import search_command, search_callback, ss_command, set_bot_username
 from orm_utils import SessionLocal, init_db
 from orm_models import User, File, SentFile, FileFeedback
+from db_migrate import migrate_db  # 导入数据库迁移函数
 
 # 加载环境变量
 load_dotenv()
@@ -15,9 +16,12 @@ TXT_ROOT = os.getenv('TXT_ROOT', '/app/share_folder')
 DB_PATH = './data/sent_files.db'
 TXT_EXTS = [x.strip() for x in os.getenv('TXT_EXTS', '.txt,.pdf').split(',') if x.strip()]
 
-# 数据库初始化
+# 数据库初始化和迁移
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 init_db()
+print("正在检查数据库更新...")
+migrate_db()  # 执行数据库迁移
+print("数据库检查完成")
 
 ADMIN_USER_ID = [int(x) for x in os.environ.get('ADMIN_USER_ID', '12345678').split(',') if x.strip().isdigit()]
 print(f"Admin User IDs: {ADMIN_USER_ID}")
