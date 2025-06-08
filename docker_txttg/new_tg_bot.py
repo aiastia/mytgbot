@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from telegram import Update, Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
 from dotenv import load_dotenv
+from search_file import search_command, search_callback, ss_command, set_bot_username
 
 # 加载环境变量
 load_dotenv()
@@ -333,7 +334,20 @@ async def getfile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text('用法：/getfile <tg_file_id>')
         return
     tg_file_id = context.args[0]
-    # 查询文件名
+    # 直接判断 file_id 前缀类型，优先用 file_id 秒传
+    if tg_file_id.startswith('BQAC') or tg_file_id.startswith('CAAC') or tg_file_id.startswith('HDAA'):
+        # 文档
+        await update.message.reply_document(tg_file_id, caption=f'文件tg_file_id: {tg_file_id}')
+        return
+    elif tg_file_id.startswith('BAAC'):
+        # 视频
+        await update.message.reply_video(tg_file_id, caption=f'文件tg_file_id: {tg_file_id}')
+        return
+    elif tg_file_id.startswith('AgAC'):
+        # 图片
+        await update.message.reply_photo(tg_file_id, caption=f'文件tg_file_id: {tg_file_id}')
+        return
+    # 兼容旧逻辑：查数据库找本地文件
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('SELECT file_path FROM files WHERE tg_file_id=?', (tg_file_id,))
@@ -443,6 +457,73 @@ async def setviplevel_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     set_user_vip_level(target_id, level)
     await update.message.reply_text(f'用户 {target_id} VIP 等级已设置为 {level}')
 
+async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = context.args
+    if not args and update.message:
+        # 兼容 /start 无参数
+        await update.message.reply_text('欢迎使用本bot！')
+        return
+    # 支持 deep link
+    if update.message:
+        start_param = update.message.text.split(' ', 1)[1] if ' ' in update.message.text else ''
+    elif update.callback_query:
+        start_param = update.callback_query.data.split(' ', 1)[1] if ' ' in update.callback_query.data else ''
+    else:
+        start_param = ''
+    if start_param.startswith('book_'):
+        # 只解析 file_id
+        try:
+            parts = start_param.split('_')
+            file_id = int(parts[1])
+        except Exception:
+            await update.message.reply_text('参数错误。')
+            return
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute('SELECT tg_file_id, file_path FROM files WHERE file_id=?', (file_id,))
+        row = c.fetchone()
+        conn.close()
+        if not row:
+            await update.message.reply_text('文件不存在。')
+            return
+        tg_file_id, file_path = row
+        # 发送文件（与 search_callback 逻辑一致）
+        try:
+            if tg_file_id and (tg_file_id.startswith('BQAC') or tg_file_id.startswith('CAAC') or tg_file_id.startswith('HDAA')):
+                await update.message.reply_document(tg_file_id, caption=f'文件tg_file_id: {tg_file_id}')
+            elif tg_file_id and tg_file_id.startswith('BAAC'):
+                await update.message.reply_video(tg_file_id, caption=f'文件tg_file_id: {tg_file_id}')
+            elif tg_file_id and tg_file_id.startswith('AgAC'):
+                await update.message.reply_photo(tg_file_id, caption=f'文件tg_file_id: {tg_file_id}')
+            elif tg_file_id is None or tg_file_id == '':
+                ext = os.path.splitext(file_path)[1].lower()
+                if ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']:
+                    with open(file_path, 'rb') as f:
+                        await update.message.reply_photo(f, caption='本地图片直传')
+                elif ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm']:
+                    with open(file_path, 'rb') as f:
+                        await update.message.reply_video(f, caption='本地视频直传')
+                elif os.path.exists(file_path):
+                    with open(file_path, 'rb') as f:
+                        await update.message.reply_document(f, caption='本地文件直传')
+                else:
+                    await update.message.reply_text('文件丢失。')
+            elif os.path.exists(file_path):
+                ext = os.path.splitext(file_path)[1].lower()
+                if ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']:
+                    with open(file_path, 'rb') as f:
+                        await update.message.reply_photo(f, caption=f'文件tg_file_id: {tg_file_id}')
+                elif ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm']:
+                    with open(file_path, 'rb') as f:
+                        await update.message.reply_video(f, caption=f'文件tg_file_id: {tg_file_id}')
+                else:
+                    with open(file_path, 'rb') as f:
+                        await update.message.reply_document(f, caption=f'文件tg_file_id: {tg_file_id}')
+            else:
+                await update.message.reply_text('文件丢失。')
+        except Exception as e:
+            await update.message.reply_text(f'发送失败: {e}')
+
 def main():
     upgrade_users_table()  # 启动时自动升级users表结构
     base_url = os.getenv('TELEGRAM_API_URL')
@@ -450,13 +531,24 @@ def main():
     if base_url:
         builder = builder.base_url(f"{base_url}/bot").base_file_url(f"{base_url}/file/bot")
     app = builder.build()
+
+    # 用 post_init 钩子自动注入 bot 用户名
+    async def set_username(app):
+        me = await app.bot.get_me()
+        set_bot_username(me.username)
+    app.post_init = set_username
+
     app.add_handler(CommandHandler('random', send_random_txt))
     app.add_handler(CommandHandler('stats', stats))
     app.add_handler(CommandHandler('hot', hot))
     app.add_handler(CommandHandler('getfile', getfile))
     app.add_handler(CommandHandler('reload', reload_command))
     app.add_handler(CommandHandler('setviplevel', setviplevel_command))
-    app.add_handler(CallbackQueryHandler(feedback_callback, pattern=r'^feedback\\|'))
+    app.add_handler(CommandHandler('start', on_start))
+    app.add_handler(CommandHandler('s', search_command))
+    app.add_handler(CommandHandler('ss', ss_command))
+    app.add_handler(CallbackQueryHandler(search_callback, pattern=r'^(spage|sget)\|'))
+    app.add_handler(CallbackQueryHandler(feedback_callback, pattern=r'^feedback\|'))
     app.run_polling()
 
 if __name__ == '__main__':
