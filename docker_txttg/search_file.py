@@ -5,9 +5,15 @@ from telegram.ext import ContextTypes
 from orm_utils import SessionLocal
 from orm_models import User, File
 
+# 工具函数：分割长消息
+MAX_TG_MSG_LEN = 4096
+def split_message(text, max_length=MAX_TG_MSG_LEN):
+    return [text[i:i+max_length] for i in range(0, len(text), max_length)]
+
 DB_PATH = './data/sent_files.db'
 PAGE_SIZE = 10
 BOT_USERNAME = None  # 由主程序注入
+SS_PAGE_SIZE = 10
 
 def set_bot_username(username):
     global BOT_USERNAME
@@ -155,14 +161,44 @@ async def ss_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text('用法：/ss <关键词>')
         return
     keyword = ' '.join(context.args)
+    await send_ss_page(update, context, keyword, page=0, edit=False)
+
+async def ss_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data.split('|')
+    if len(data) == 3 and data[0] == 'sspage':
+        keyword = data[1]
+        page = int(data[2])
+        await send_ss_page(update, context, keyword, page=page, edit=True)
+
+async def send_ss_page(update, context, keyword, page=0, edit=False):
     results = search_files_by_name(keyword)
-    if not results:
-        await update.message.reply_text('未找到相关文件。')
+    total = len(results)
+    if total == 0:
+        msg = '未找到相关文件。'
+        if edit and update.callback_query:
+            await update.callback_query.edit_message_text(msg)
+        else:
+            await update.message.reply_text(msg)
         return
+    start = page * SS_PAGE_SIZE
+    end = start + SS_PAGE_SIZE
+    page_rows = results[start:end]
     links = []
-    for idx, (file_id, file_path, tg_file_id) in enumerate(results, 1):
+    for idx, (file_id, file_path, tg_file_id) in enumerate(page_rows, start+1):
         filename = os.path.basename(file_path)
         link = f'https://t.me/{BOT_USERNAME}?start=book_{file_id}'
         links.append(f'{idx}. <a href="{link}">{filename}</a>')
-    msg = f'搜索结果，共{len(results)}个文件：\n' + '\n'.join(links)
-    await update.message.reply_text(msg, parse_mode='HTML', disable_web_page_preview=True)
+    msg = f'搜索结果，共{total}个文件：\n' + '\n'.join(links)
+    # 分页按钮
+    buttons = []
+    if page > 0:
+        buttons.append(InlineKeyboardButton('上一页', callback_data=f'sspage|{keyword}|{page-1}'))
+    if end < total:
+        buttons.append(InlineKeyboardButton('下一页', callback_data=f'sspage|{keyword}|{page+1}'))
+    reply_markup = InlineKeyboardMarkup([buttons]) if buttons else None
+    if edit and update.callback_query:
+        await update.callback_query.edit_message_text(msg, parse_mode='HTML', disable_web_page_preview=True, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(msg, parse_mode='HTML', disable_web_page_preview=True, reply_markup=reply_markup)

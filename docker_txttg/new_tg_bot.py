@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from telegram import Update, Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
 from dotenv import load_dotenv
-from search_file import search_command, search_callback, ss_command, set_bot_username
+from search_file import search_command, search_callback, ss_command, set_bot_username, split_message
 from orm_utils import SessionLocal, init_db
 from orm_models import User, File, SentFile, FileFeedback
 from db_migrate import migrate_db  # 导入数据库迁移函数
@@ -228,37 +228,67 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     count = len(get_sent_file_ids(user_id))
     await update.message.reply_text(f'你已收到 {count} 个文件。')
 
-# 热榜展示 tg_file_id
+HOT_PAGE_SIZE = 10
+
 async def hot(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_hot_page(update, context, page=0, edit=False)
+
+async def hot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data.split('|')
+    if len(data) == 2 and data[0] == 'hotpage':
+        page = int(data[1])
+        await send_hot_page(update, context, page=page, edit=True)
+
+async def send_hot_page(update, context, page=0, edit=False):
     with SessionLocal() as session:
+        from sqlalchemy import func
         seven_days_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+        likes_subq = session.query(
+            FileFeedback.file_id,
+            func.count().label('likes')
+        ).filter(
+            FileFeedback.feedback == 1,
+            FileFeedback.date >= seven_days_ago
+        ).group_by(FileFeedback.file_id).subquery()
         rows = (
-            session.query(File.file_path, File.tg_file_id, session.query(FileFeedback).filter(
-                FileFeedback.file_id == File.file_id,
-                FileFeedback.feedback == 1,
-                FileFeedback.date >= seven_days_ago
-            ).count().label('likes'))
-            .filter(session.query(FileFeedback).filter(
-                FileFeedback.file_id == File.file_id,
-                FileFeedback.feedback == 1,
-                FileFeedback.date >= seven_days_ago
-            ).exists())
-            .order_by(-session.query(FileFeedback).filter(
-                FileFeedback.file_id == File.file_id,
-                FileFeedback.feedback == 1,
-                FileFeedback.date >= seven_days_ago
-            ).count(), File.file_path)
-            .limit(10)
+            session.query(
+                File.file_path,
+                File.tg_file_id,
+                func.coalesce(likes_subq.c.likes, 0)
+            )
+            .outerjoin(likes_subq, File.file_id == likes_subq.c.file_id)
+            .filter(likes_subq.c.likes != None)
+            .order_by(likes_subq.c.likes.desc(), File.file_path)
             .all()
         )
-    if not rows:
-        await update.message.reply_text('最近7天还没有文件收到👍，快去评分吧！')
+    total = len(rows)
+    if total == 0:
+        msg = '最近7天还没有文件收到👍，快去评分吧！'
+        if edit and update.callback_query:
+            await update.callback_query.edit_message_text(msg)
+        else:
+            await update.message.reply_text(msg)
         return
+    start = page * HOT_PAGE_SIZE
+    end = start + HOT_PAGE_SIZE
+    page_rows = rows[start:end]
     msg = '🔥 <b>热榜（近7天👍最多的文件）</b> 🔥\n\n'
-    for idx, (file_path, tg_file_id, likes) in enumerate(rows, 1):
+    for idx, (file_path, tg_file_id, likes) in enumerate(page_rows, start+1):
         filename = os.path.basename(file_path)
         msg += f'<b>{idx}. {filename}</b>\n📄 <code>{tg_file_id}</code>\n👍 <b>{likes}</b>\n\n'
-    await update.message.reply_text(msg, parse_mode='HTML')
+    # 分页按钮
+    buttons = []
+    if page > 0:
+        buttons.append(InlineKeyboardButton('上一页', callback_data=f'hotpage|{page-1}'))
+    if end < total:
+        buttons.append(InlineKeyboardButton('下一页', callback_data=f'hotpage|{page+1}'))
+    reply_markup = InlineKeyboardMarkup([buttons]) if buttons else None
+    if edit and update.callback_query:
+        await update.callback_query.edit_message_text(msg, parse_mode='HTML', reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(msg, parse_mode='HTML', reply_markup=reply_markup)
 
 # 新增命令：用户输入tg_file_id获取文件
 async def getfile(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -475,6 +505,8 @@ def main():
     app.add_handler(CommandHandler('ss', ss_command))
     app.add_handler(CallbackQueryHandler(search_callback, pattern=r'^(spage|sget)\|'))
     app.add_handler(CallbackQueryHandler(feedback_callback, pattern=r'^feedback\|'))
+    app.add_handler(CallbackQueryHandler(hot_callback, pattern=r'^hotpage\|'))
+    app.add_handler(CallbackQueryHandler(ss_callback, pattern=r'^sspage\|'))
     app.run_polling()
 
 if __name__ == '__main__':
