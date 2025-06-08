@@ -460,11 +460,14 @@ async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         new_file_id = msg.photo[-1].file_id if msg.photo else None
                 elif ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm']:
                     with open(file_path, 'rb') as f:
+        
                         msg = await update.message.reply_video(f, caption='本地视频直传')
                         new_file_id = msg.video.file_id
                 elif os.path.exists(file_path):
                     with open(file_path, 'rb') as f:
-                        msg = await update.message.reply_document(f, caption='本地文件直传')
+                        input_file = InputFile(f, read_file_handle=False)
+                        msg = await update.message.reply_document(input_file, caption='本地文件直传', timeout=120)
+                        #msg = await update.message.reply_document(f, caption='本地文件直传')
                         new_file_id = msg.document.file_id
                 else:
                     await update.message.reply_text('文件丢失。')
