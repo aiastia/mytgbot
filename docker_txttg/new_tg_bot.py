@@ -266,7 +266,7 @@ async def send_hot_page(update, context, page=0, edit=False):
         )
     total = len(rows)
     if total == 0:
-        msg = '最近7天还没有文件收到��，快去评分吧！'
+        msg = '最近7天还没有文件收到，快去评分吧！'
         if edit and update.callback_query:
             await update.callback_query.edit_message_text(msg)
         else:
@@ -420,7 +420,18 @@ async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         start_param = update.callback_query.data.split(' ', 1)[1] if ' ' in update.callback_query.data else ''
     else:
         start_param = ''
+    
     if start_param.startswith('book_'):
+        # 检查用户权限
+        user_id = update.effective_user.id
+        vip_level = get_user_vip_level(user_id)
+        if vip_level < 1:
+            if update.message:
+                await update.message.reply_text('只有VIP1及以上用户才能使用此功能。')
+            elif update.callback_query:
+                await update.callback_query.answer('只有VIP1及以上用户才能使用此功能。', show_alert=True)
+            return
+            
         # 只解析 file_id
         try:
             parts = start_param.split('_')
