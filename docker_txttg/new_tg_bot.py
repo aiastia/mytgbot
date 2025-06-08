@@ -494,15 +494,22 @@ async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ext = os.path.splitext(file_path)[1].lower()
                 if ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']:
                     with open(file_path, 'rb') as f:
-                        await update.message.reply_photo(f, caption='本地图片直传')
+                        msg = await update.message.reply_photo(f, caption='本地图片直传')
+                        new_file_id = msg.photo[-1].file_id if msg.photo else None
                 elif ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm']:
                     with open(file_path, 'rb') as f:
-                        await update.message.reply_video(f, caption='本地视频直传')
+                        msg = await update.message.reply_video(f, caption='本地视频直传')
+                        new_file_id = msg.video.file_id
                 elif os.path.exists(file_path):
                     with open(file_path, 'rb') as f:
-                        await update.message.reply_document(f, caption='本地文件直传')
+                        msg = await update.message.reply_document(f, caption='本地文件直传')
+                        new_file_id = msg.document.file_id
                 else:
                     await update.message.reply_text('文件丢失。')
+                    return
+                # 关键：本地直传后写入tg_file_id
+                if new_file_id:
+                    update_file_tg_id(file_id, new_file_id)
             elif os.path.exists(file_path):
                 ext = os.path.splitext(file_path)[1].lower()
                 if ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']:
