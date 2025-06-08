@@ -2,6 +2,7 @@ import os
 import random
 from datetime import datetime, timedelta
 from telegram import Update, Bot, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import InputFile
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
 from dotenv import load_dotenv
 from search_file import search_command, search_callback, ss_command, set_bot_username, split_message
