@@ -5,6 +5,7 @@ from telegram import Update, Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
 from dotenv import load_dotenv
 from search_file import search_command, search_callback, ss_command, set_bot_username, split_message
+from search_file import ss_callback
 from orm_utils import SessionLocal, init_db
 from orm_models import User, File, SentFile, FileFeedback
 from db_migrate import migrate_db  # 导入数据库迁移函数
@@ -265,7 +266,7 @@ async def send_hot_page(update, context, page=0, edit=False):
         )
     total = len(rows)
     if total == 0:
-        msg = '最近7天还没有文件收到👍，快去评分吧！'
+        msg = '最近7天还没有文件收到��，快去评分吧！'
         if edit and update.callback_query:
             await update.callback_query.edit_message_text(msg)
         else:
