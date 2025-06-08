@@ -41,6 +41,16 @@ def build_search_keyboard(results, page, keyword):
     return InlineKeyboardMarkup(keyboard)
 
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT vip_level FROM users WHERE user_id=?', (user_id,))
+    row = c.fetchone()
+    conn.close()
+    vip_level = row[0] if row else 0
+    if vip_level < 3:
+        await update.message.reply_text('只有VIP3及以上用户才能使用此命令。')
+        return
     if not context.args:
         await update.message.reply_text('用法：/s <关键词>')
         return
@@ -136,6 +146,16 @@ async def search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer()
 
 async def ss_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT vip_level FROM users WHERE user_id=?', (user_id,))
+    row = c.fetchone()
+    conn.close()
+    vip_level = row[0] if row else 0
+    if vip_level < 2:
+        await update.message.reply_text('只有VIP2及以上用户才能使用此命令。')
+        return
     if not context.args:
         await update.message.reply_text('用法：/ss <关键词>')
         return
