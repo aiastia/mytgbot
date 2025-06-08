@@ -5,10 +5,8 @@ from telegram import Update, Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
 from dotenv import load_dotenv
 from search_file import search_command, search_callback, ss_command, set_bot_username
-from db_utils import (
-    get_db_conn, get_user_vip_level, get_file_by_id, search_files_by_name, update_file_tg_id
-)
-import sqlite3  # 仅用于升级表结构和部分未迁移代码
+from orm_utils import SessionLocal, init_db
+from orm_models import User, File, SentFile, FileFeedback
 
 # 加载环境变量
 load_dotenv()
@@ -19,112 +17,55 @@ TXT_EXTS = [x.strip() for x in os.getenv('TXT_EXTS', '.txt,.pdf').split(',') if 
 
 # 数据库初始化
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-conn = get_db_conn()
-c = conn.cursor()
-# users表
-c.execute('''CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    vip_level INTEGER DEFAULT 0,
-    vip_date TEXT
-)''')
-# files表
-c.execute('''CREATE TABLE IF NOT EXISTS files (
-    file_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    file_path TEXT UNIQUE,
-    tg_file_id TEXT
-)''')
-# sent_files中间表
-c.execute('''CREATE TABLE IF NOT EXISTS sent_files (
-    user_id INTEGER,
-    file_id INTEGER,
-    date TEXT,
-    PRIMARY KEY (user_id, file_id),
-    FOREIGN KEY (user_id) REFERENCES users(user_id),
-    FOREIGN KEY (file_id) REFERENCES files(file_id)
-)''')
-# 新增反馈表
-c.execute('''CREATE TABLE IF NOT EXISTS file_feedback (
-    user_id INTEGER,
-    file_id INTEGER,
-    feedback INTEGER, -- 1=👍, -1=👎
-    date TEXT,
-    PRIMARY KEY (user_id, file_id),
-    FOREIGN KEY (user_id) REFERENCES users(user_id),
-    FOREIGN KEY (file_id) REFERENCES files(file_id)
-)''')
-conn.commit()
-conn.close()
+init_db()
 
 ADMIN_USER_ID = [int(x) for x in os.environ.get('ADMIN_USER_ID', '12345678').split(',') if x.strip().isdigit()]
 print(f"Admin User IDs: {ADMIN_USER_ID}")
 
-# 检查并升级 files 表结构，添加 file_size 字段（如无）
-def upgrade_files_table():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("PRAGMA table_info(files)")
-    columns = [row[1] for row in c.fetchall()]
-    if 'file_size' not in columns:
-        c.execute("ALTER TABLE files ADD COLUMN file_size INTEGER")
-        conn.commit()
-    conn.close()
-
-# 检查并升级 users 表结构，添加 vip_level 和 vip_date 字段（如无）
-def upgrade_users_table():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("PRAGMA table_info(users)")
-    columns = [row[1] for row in c.fetchall()]
-    if 'vip_level' not in columns:
-        c.execute("ALTER TABLE users ADD COLUMN vip_level INTEGER DEFAULT 0")
-    if 'vip_date' not in columns:
-        c.execute("ALTER TABLE users ADD COLUMN vip_date TEXT")
-    conn.commit()
-    conn.close()
-
-# 文件表操作
+# ORM操作示例函数
 
 def get_or_create_file(file_path, tg_file_id=None):
-    conn = get_db_conn()
-    c = conn.cursor()
-    c.execute('SELECT file_id, tg_file_id FROM files WHERE file_path=?', (file_path,))
-    row = c.fetchone()
-    if row:
-        file_id, old_tg_file_id = row
-        if tg_file_id and tg_file_id != old_tg_file_id:
-            c.execute('UPDATE files SET tg_file_id=? WHERE file_id=?', (tg_file_id, file_id))
-            conn.commit()
-        conn.close()
-        return file_id
-    try:
-        file_size = os.path.getsize(file_path)
-    except Exception:
+    with SessionLocal() as session:
+        file = session.query(File).filter_by(file_path=file_path).first()
+        if file:
+            if tg_file_id and tg_file_id != file.tg_file_id:
+                file.tg_file_id = tg_file_id
+                session.commit()
+            return file.file_id
         file_size = None
-    c.execute('INSERT INTO files (file_path, tg_file_id, file_size) VALUES (?, ?, ?)', (file_path, tg_file_id, file_size))
-    conn.commit()
-    file_id = c.lastrowid
-    conn.close()
-    return file_id
-
-# 用户表操作
+        try:
+            file_size = os.path.getsize(file_path)
+        except Exception:
+            pass
+        new_file = File(file_path=file_path, tg_file_id=tg_file_id, file_size=file_size)
+        session.add(new_file)
+        session.commit()
+        return new_file.file_id
 
 def ensure_user(user_id):
-    conn = get_db_conn()
-    c = conn.cursor()
-    c.execute('INSERT OR IGNORE INTO users (user_id) VALUES (?)', (user_id,))
-    conn.commit()
-    conn.close()
+    with SessionLocal() as session:
+        user = session.query(User).filter_by(user_id=user_id).first()
+        if not user:
+            session.add(User(user_id=user_id))
+            session.commit()
 
 def set_user_vip_level(user_id, vip_level):
-    conn = get_db_conn()
-    c = conn.cursor()
-    vip_date = datetime.now().strftime('%Y-%m-%d') if vip_level > 0 else None
-    if vip_level > 0:
-        c.execute('UPDATE users SET vip_level=?, vip_date=? WHERE user_id=?', (vip_level, vip_date, user_id))
-    else:
-        c.execute('UPDATE users SET vip_level=0, vip_date=NULL WHERE user_id=?', (user_id,))
-    conn.commit()
-    conn.close()
+    with SessionLocal() as session:
+        user = session.query(User).filter_by(user_id=user_id).first()
+        if user:
+            vip_date = datetime.now().strftime('%Y-%m-%d') if vip_level > 0 else None
+            if vip_level > 0:
+                user.vip_level = vip_level
+                user.vip_date = vip_date
+            else:
+                user.vip_level = 0
+                user.vip_date = None
+            session.commit()
+
+def get_user_vip_level(user_id):
+    with SessionLocal() as session:
+        user = session.query(User).filter_by(user_id=user_id).first()
+        return user.vip_level if user else 0
 
 def get_user_daily_limit(user_id):
     level = get_user_vip_level(user_id)
@@ -137,85 +78,71 @@ def get_user_daily_limit(user_id):
     else:
         return 10
 
-# sent_files表操作
-
 def get_sent_file_ids(user_id):
-    conn = get_db_conn()
-    c = conn.cursor()
-    c.execute('SELECT file_id FROM sent_files WHERE user_id=?', (user_id,))
-    ids = [row[0] for row in c.fetchall()]
-    conn.close()
+    with SessionLocal() as session:
+        ids = [row.file_id for row in session.query(SentFile.file_id).filter_by(user_id=user_id).all()]
     return ids
 
 def mark_file_sent(user_id, file_id):
-    conn = get_db_conn()
-    c = conn.cursor()
-    date = datetime.now().strftime('%Y-%m-%d')
-    c.execute('INSERT OR IGNORE INTO sent_files (user_id, file_id, date) VALUES (?, ?, ?)', (user_id, file_id, date))
-    conn.commit()
-    conn.close()
+    with SessionLocal() as session:
+        date = datetime.now().strftime('%Y-%m-%d')
+        session.merge(SentFile(user_id=user_id, file_id=file_id, date=date))
 
 def get_today_sent_count(user_id):
-    conn = get_db_conn()
-    c = conn.cursor()
-    today = datetime.now().strftime('%Y-%m-%d')
-    c.execute('SELECT COUNT(*) FROM sent_files WHERE user_id=? AND date=?', (user_id, today))
-    count = c.fetchone()[0]
-    conn.close()
+    with SessionLocal() as session:
+        today = datetime.now().strftime('%Y-%m-%d')
+        count = session.query(SentFile).filter_by(user_id=user_id, date=today).count()
     return count
+
+def upgrade_files_table():
+    pass  # ORM自动管理表结构，无需手动升级
+
+def upgrade_users_table():
+    pass  # ORM自动管理表结构，无需手动升级
 
 def reload_txt_files():
     """扫描TXT_ROOT下所有txt/pdf文件，插入到数据库files表（已存在则跳过），并维护文件大小"""
-    upgrade_files_table()
     txt_files = []
     for root, dirs, files in os.walk(TXT_ROOT):
         for file in files:
             if any(file.endswith(ext) for ext in TXT_EXTS):
                 txt_files.append(os.path.join(root, file))
-    conn = get_db_conn()
-    c = conn.cursor()
     inserted, skipped = 0, 0
-    for file_path in txt_files:
-        try:
-            file_size = os.path.getsize(file_path)
-            c.execute('INSERT OR IGNORE INTO files (file_path, file_size) VALUES (?, ?)', (file_path, file_size))
-            if c.rowcount == 0:
-                # 已存在则尝试更新文件大小
-                c.execute('UPDATE files SET file_size=? WHERE file_path=?', (file_size, file_path))
+    with SessionLocal() as session:
+        for file_path in txt_files:
+            try:
+                file_size = os.path.getsize(file_path)
+                file = session.query(File).filter_by(file_path=file_path).first()
+                if file:
+                    if file.file_size != file_size:
+                        file.file_size = file_size
+                        session.commit()
+                    skipped += 1
+                else:
+                    new_file = File(file_path=file_path, file_size=file_size)
+                    session.add(new_file)
+                    session.commit()
+                    inserted += 1
+            except Exception:
                 skipped += 1
-            else:
-                inserted += 1
-        except Exception:
-            skipped += 1
-    conn.commit()
-    conn.close()
     return inserted, skipped
 
 def get_all_txt_files():
-    conn = get_db_conn()
-    c = conn.cursor()
-    c.execute('SELECT file_path FROM files')
-    files = [row[0] for row in c.fetchall()]
-    conn.close()
+    with SessionLocal() as session:
+        files = [row.file_path for row in session.query(File.file_path).all()]
     return files
 
 # 记录反馈
 def record_feedback(user_id, file_id, feedback):
-    conn = get_db_conn()
-    c = conn.cursor()
-    date = datetime.now().strftime('%Y-%m-%d')
-    c.execute('''INSERT OR REPLACE INTO file_feedback (user_id, file_id, feedback, date)
-                 VALUES (?, ?, ?, ?)''', (user_id, file_id, feedback, date))
-    conn.commit()
-    conn.close()
+    with SessionLocal() as session:
+        date = datetime.now().strftime('%Y-%m-%d')
+        session.merge(FileFeedback(user_id=user_id, file_id=file_id, feedback=feedback, date=date))
 
 def get_unsent_files(user_id):
     all_files = get_all_txt_files()
-    conn = get_db_conn()
-    c = conn.cursor()
-    c.execute('SELECT file_id, file_path FROM files')
-    file_map = {row[1]: row[0] for row in c.fetchall()}
-    sent_ids = set(get_sent_file_ids(user_id))
+    with SessionLocal() as session:
+        file_map = {row.file_path: row.file_id for row in session.query(File.file_id, File.file_path).all()}
+        sent_ids = set(get_sent_file_ids(user_id))
     unsent = []
     for file_path in all_files:
         file_id = file_map.get(file_path)
@@ -223,7 +150,6 @@ def get_unsent_files(user_id):
             unsent.append(file_path)
         elif file_id not in sent_ids:
             unsent.append(file_path)
-    conn.close()
     return unsent
 
 async def send_random_txt(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -300,20 +226,27 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # 热榜展示 tg_file_id
 async def hot(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    conn = get_db_conn()
-    c = conn.cursor()
-    seven_days_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
-    c.execute('''
-        SELECT f.file_path, f.tg_file_id, COUNT(*) as likes
-        FROM file_feedback fb
-        JOIN files f ON fb.file_id = f.file_id
-        WHERE fb.feedback=1 AND fb.date >= ?
-        GROUP BY fb.file_id
-        ORDER BY likes DESC, f.file_path ASC
-        LIMIT 10
-    ''', (seven_days_ago,))
-    rows = c.fetchall()
-    conn.close()
+    with SessionLocal() as session:
+        seven_days_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+        rows = (
+            session.query(File.file_path, File.tg_file_id, session.query(FileFeedback).filter(
+                FileFeedback.file_id == File.file_id,
+                FileFeedback.feedback == 1,
+                FileFeedback.date >= seven_days_ago
+            ).count().label('likes'))
+            .filter(session.query(FileFeedback).filter(
+                FileFeedback.file_id == File.file_id,
+                FileFeedback.feedback == 1,
+                FileFeedback.date >= seven_days_ago
+            ).exists())
+            .order_by(-session.query(FileFeedback).filter(
+                FileFeedback.file_id == File.file_id,
+                FileFeedback.feedback == 1,
+                FileFeedback.date >= seven_days_ago
+            ).count(), File.file_path)
+            .limit(10)
+            .all()
+        )
     if not rows:
         await update.message.reply_text('最近7天还没有文件收到👍，快去评分吧！')
         return
@@ -329,29 +262,21 @@ async def getfile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text('用法：/getfile <tg_file_id>')
         return
     tg_file_id = context.args[0]
-    # 直接判断 file_id 前缀类型，优先用 file_id 秒传
     if tg_file_id.startswith('BQAC') or tg_file_id.startswith('CAAC') or tg_file_id.startswith('HDAA'):
-        # 文档
         await update.message.reply_document(tg_file_id, caption=f'文件tg_file_id: {tg_file_id}')
         return
     elif tg_file_id.startswith('BAAC'):
-        # 视频
         await update.message.reply_video(tg_file_id, caption=f'文件tg_file_id: {tg_file_id}')
         return
     elif tg_file_id.startswith('AgAC'):
-        # 图片
         await update.message.reply_photo(tg_file_id, caption=f'文件tg_file_id: {tg_file_id}')
         return
-    # 兼容旧逻辑：查数据库找本地文件
-    conn = get_db_conn()
-    c = conn.cursor()
-    c.execute('SELECT file_path FROM files WHERE tg_file_id=?', (tg_file_id,))
-    row = c.fetchone()
-    conn.close()
-    if not row:
-        await update.message.reply_text('未找到该文件。')
-        return
-    file_path = row[0]
+    with SessionLocal() as session:
+        file = session.query(File).filter_by(tg_file_id=tg_file_id).first()
+        if not file:
+            await update.message.reply_text('未找到该文件。')
+            return
+        file_path = file.file_path
     if not os.path.exists(file_path):
         await update.message.reply_text('文件已丢失或被删除。')
         return
@@ -369,14 +294,9 @@ async def feedback_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file_id = int(data[1])
         feedback = int(data[2])
         record_feedback(user_id, file_id, feedback)
-        # 查找tg_file_id
-        conn = get_db_conn()
-        c = conn.cursor()
-        c.execute('SELECT tg_file_id FROM files WHERE file_id=?', (file_id,))
-        row = c.fetchone()
-        conn.close()
-        tg_file_id = row[0] if row else ''
-        # 按钮高亮
+        with SessionLocal() as session:
+            file = session.query(File).filter_by(file_id=file_id).first()
+            tg_file_id = file.tg_file_id if file else ''
         if feedback == 1:
             keyboard = [
                 [
@@ -397,9 +317,9 @@ async def feedback_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 caption=f"文件tg_file_id: {tg_file_id}",
                 reply_markup=reply_markup
             )
-        except telegram.error.BadRequest as e:
+        except Exception as e:
             if 'Message is not modified' in str(e):
-                pass  # 用户重复点击同一按钮，忽略即可
+                pass
             else:
                 raise
 
@@ -473,16 +393,12 @@ async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             await update.message.reply_text('参数错误。')
             return
-        conn = get_db_conn()
-        c = conn.cursor()
-        c.execute('SELECT tg_file_id, file_path FROM files WHERE file_id=?', (file_id,))
-        row = c.fetchone()
-        conn.close()
-        if not row:
+        with SessionLocal() as session:
+            file = session.query(File).filter_by(file_id=file_id).first()
+        if not file:
             await update.message.reply_text('文件不存在。')
             return
-        tg_file_id, file_path = row
-        # 发送文件（与 search_callback 逻辑一致）
+        tg_file_id, file_path = file.tg_file_id, file.file_path
         try:
             if tg_file_id and (tg_file_id.startswith('BQAC') or tg_file_id.startswith('CAAC') or tg_file_id.startswith('HDAA')):
                 await update.message.reply_document(tg_file_id, caption=f'文件tg_file_id: {tg_file_id}')
@@ -509,7 +425,11 @@ async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     return
                 # 关键：本地直传后写入tg_file_id
                 if new_file_id:
-                    update_file_tg_id(file_id, new_file_id)
+                    with SessionLocal() as session:
+                        file = session.query(File).filter_by(file_id=file_id).first()
+                        if file:
+                            file.tg_file_id = new_file_id
+                            session.commit()
             elif os.path.exists(file_path):
                 ext = os.path.splitext(file_path)[1].lower()
                 if ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']:

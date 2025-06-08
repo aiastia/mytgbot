@@ -2,7 +2,8 @@ import os
 import math
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
-from db_utils import get_user_vip_level, get_file_by_id, search_files_by_name, update_file_tg_id
+from orm_utils import SessionLocal
+from orm_models import User, File
 
 DB_PATH = './data/sent_files.db'
 PAGE_SIZE = 10
@@ -11,6 +12,30 @@ BOT_USERNAME = None  # 由主程序注入
 def set_bot_username(username):
     global BOT_USERNAME
     BOT_USERNAME = username
+
+def get_user_vip_level(user_id):
+    with SessionLocal() as session:
+        user = session.query(User).filter_by(user_id=user_id).first()
+        return user.vip_level if user else 0
+
+def get_file_by_id(file_id):
+    with SessionLocal() as session:
+        file = session.query(File).filter_by(file_id=file_id).first()
+        if file:
+            return file.tg_file_id, file.file_path
+        return None
+
+def search_files_by_name(keyword):
+    with SessionLocal() as session:
+        results = session.query(File).filter(File.file_path.like(f"%{keyword}%")).order_by(File.file_id.desc()).all()
+        return [(file.file_id, file.file_path, file.tg_file_id) for file in results]
+
+def update_file_tg_id(file_id, tg_file_id):
+    with SessionLocal() as session:
+        file = session.query(File).filter_by(file_id=file_id).first()
+        if file:
+            file.tg_file_id = tg_file_id
+            session.commit()
 
 def build_search_keyboard(results, page, keyword):
     start = page * PAGE_SIZE
