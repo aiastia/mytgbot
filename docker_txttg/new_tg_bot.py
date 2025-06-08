@@ -1,11 +1,14 @@
 import os
 import random
-import sqlite3
 from datetime import datetime, timedelta
 from telegram import Update, Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
 from dotenv import load_dotenv
 from search_file import search_command, search_callback, ss_command, set_bot_username
+from db_utils import (
+    get_db_conn, get_user_vip_level, get_file_by_id, search_files_by_name, update_file_tg_id
+)
+import sqlite3  # 仅用于升级表结构和部分未迁移代码
 
 # 加载环境变量
 load_dotenv()
@@ -16,7 +19,7 @@ TXT_EXTS = [x.strip() for x in os.getenv('TXT_EXTS', '.txt,.pdf').split(',') if 
 
 # 数据库初始化
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-conn = sqlite3.connect(DB_PATH)
+conn = get_db_conn()
 c = conn.cursor()
 # users表
 c.execute('''CREATE TABLE IF NOT EXISTS users (
@@ -82,7 +85,7 @@ def upgrade_users_table():
 # 文件表操作
 
 def get_or_create_file(file_path, tg_file_id=None):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_conn()
     c = conn.cursor()
     c.execute('SELECT file_id, tg_file_id FROM files WHERE file_path=?', (file_path,))
     row = c.fetchone()
@@ -93,7 +96,6 @@ def get_or_create_file(file_path, tg_file_id=None):
             conn.commit()
         conn.close()
         return file_id
-    # 新增时插入文件大小
     try:
         file_size = os.path.getsize(file_path)
     except Exception:
@@ -107,14 +109,14 @@ def get_or_create_file(file_path, tg_file_id=None):
 # 用户表操作
 
 def ensure_user(user_id):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_conn()
     c = conn.cursor()
     c.execute('INSERT OR IGNORE INTO users (user_id) VALUES (?)', (user_id,))
     conn.commit()
     conn.close()
 
 def set_user_vip_level(user_id, vip_level):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_conn()
     c = conn.cursor()
     vip_date = datetime.now().strftime('%Y-%m-%d') if vip_level > 0 else None
     if vip_level > 0:
@@ -125,13 +127,7 @@ def set_user_vip_level(user_id, vip_level):
     conn.close()
 
 def get_user_daily_limit(user_id):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('SELECT vip_level FROM users WHERE user_id=?', (user_id,))
-    row = c.fetchone()
-    conn.close()
-    level = row[0] if row else 0
-    # 你可以自定义不同等级的领取上限
+    level = get_user_vip_level(user_id)
     if level == 3:
         return 100
     elif level == 2:
@@ -144,7 +140,7 @@ def get_user_daily_limit(user_id):
 # sent_files表操作
 
 def get_sent_file_ids(user_id):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_conn()
     c = conn.cursor()
     c.execute('SELECT file_id FROM sent_files WHERE user_id=?', (user_id,))
     ids = [row[0] for row in c.fetchall()]
@@ -152,7 +148,7 @@ def get_sent_file_ids(user_id):
     return ids
 
 def mark_file_sent(user_id, file_id):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_conn()
     c = conn.cursor()
     date = datetime.now().strftime('%Y-%m-%d')
     c.execute('INSERT OR IGNORE INTO sent_files (user_id, file_id, date) VALUES (?, ?, ?)', (user_id, file_id, date))
@@ -160,7 +156,7 @@ def mark_file_sent(user_id, file_id):
     conn.close()
 
 def get_today_sent_count(user_id):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_conn()
     c = conn.cursor()
     today = datetime.now().strftime('%Y-%m-%d')
     c.execute('SELECT COUNT(*) FROM sent_files WHERE user_id=? AND date=?', (user_id, today))
@@ -176,7 +172,7 @@ def reload_txt_files():
         for file in files:
             if any(file.endswith(ext) for ext in TXT_EXTS):
                 txt_files.append(os.path.join(root, file))
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_conn()
     c = conn.cursor()
     inserted, skipped = 0, 0
     for file_path in txt_files:
@@ -196,7 +192,7 @@ def reload_txt_files():
     return inserted, skipped
 
 def get_all_txt_files():
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_conn()
     c = conn.cursor()
     c.execute('SELECT file_path FROM files')
     files = [row[0] for row in c.fetchall()]
@@ -205,7 +201,7 @@ def get_all_txt_files():
 
 # 记录反馈
 def record_feedback(user_id, file_id, feedback):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_conn()
     c = conn.cursor()
     date = datetime.now().strftime('%Y-%m-%d')
     c.execute('''INSERT OR REPLACE INTO file_feedback (user_id, file_id, feedback, date)
@@ -215,9 +211,8 @@ def record_feedback(user_id, file_id, feedback):
 
 def get_unsent_files(user_id):
     all_files = get_all_txt_files()
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_conn()
     c = conn.cursor()
-    # 获取所有file_id和file_path
     c.execute('SELECT file_id, file_path FROM files')
     file_map = {row[1]: row[0] for row in c.fetchall()}
     sent_ids = set(get_sent_file_ids(user_id))
@@ -305,7 +300,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # 热榜展示 tg_file_id
 async def hot(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_conn()
     c = conn.cursor()
     seven_days_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
     c.execute('''
@@ -348,7 +343,7 @@ async def getfile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_photo(tg_file_id, caption=f'文件tg_file_id: {tg_file_id}')
         return
     # 兼容旧逻辑：查数据库找本地文件
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_conn()
     c = conn.cursor()
     c.execute('SELECT file_path FROM files WHERE tg_file_id=?', (tg_file_id,))
     row = c.fetchone()
@@ -375,7 +370,7 @@ async def feedback_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         feedback = int(data[2])
         record_feedback(user_id, file_id, feedback)
         # 查找tg_file_id
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_conn()
         c = conn.cursor()
         c.execute('SELECT tg_file_id FROM files WHERE file_id=?', (file_id,))
         row = c.fetchone()
@@ -478,7 +473,7 @@ async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             await update.message.reply_text('参数错误。')
             return
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_conn()
         c = conn.cursor()
         c.execute('SELECT tg_file_id, file_path FROM files WHERE file_id=?', (file_id,))
         row = c.fetchone()

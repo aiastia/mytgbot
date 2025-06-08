@@ -1,8 +1,8 @@
 import os
 import math
-import sqlite3
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
+from db_utils import get_user_vip_level, get_file_by_id, search_files_by_name, update_file_tg_id
 
 DB_PATH = './data/sent_files.db'
 PAGE_SIZE = 10
@@ -11,14 +11,6 @@ BOT_USERNAME = None  # 由主程序注入
 def set_bot_username(username):
     global BOT_USERNAME
     BOT_USERNAME = username
-
-def search_files_by_name(keyword):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT file_id, file_path, tg_file_id FROM files WHERE file_path LIKE ? ORDER BY file_id DESC", (f"%{keyword}%",))
-    results = c.fetchall()
-    conn.close()
-    return results
 
 def build_search_keyboard(results, page, keyword):
     start = page * PAGE_SIZE
@@ -42,12 +34,7 @@ def build_search_keyboard(results, page, keyword):
 
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('SELECT vip_level FROM users WHERE user_id=?', (user_id,))
-    row = c.fetchone()
-    conn.close()
-    vip_level = row[0] if row else 0
+    vip_level = get_user_vip_level(user_id)
     if vip_level < 3:
         await update.message.reply_text('只有VIP3及以上用户才能使用此命令。')
         return
@@ -73,11 +60,7 @@ async def search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_reply_markup(reply_markup=reply_markup)
     elif data[0] == 'sget':
         file_id = int(data[1])
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute('SELECT tg_file_id, file_path FROM files WHERE file_id=?', (file_id,))
-        row = c.fetchone()
-        conn.close()
+        row = get_file_by_id(file_id)
         if not row:
             await query.answer('文件不存在', show_alert=True)
             return
@@ -111,11 +94,7 @@ async def search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     return
                 # 更新数据库
                 if new_file_id:
-                    conn = sqlite3.connect(DB_PATH)
-                    c = conn.cursor()
-                    c.execute('UPDATE files SET tg_file_id=? WHERE file_id=?', (new_file_id, file_id))
-                    conn.commit()
-                    conn.close()
+                    update_file_tg_id(file_id, new_file_id)
             elif os.path.exists(file_path):
                 ext = os.path.splitext(file_path)[1].lower()
                 if ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']:
@@ -133,11 +112,7 @@ async def search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         new_file_id = msg.document.file_id
                 # 更新数据库
                 if new_file_id and new_file_id != tg_file_id:
-                    conn = sqlite3.connect(DB_PATH)
-                    c = conn.cursor()
-                    c.execute('UPDATE files SET tg_file_id=? WHERE file_id=?', (new_file_id, file_id))
-                    conn.commit()
-                    conn.close()
+                    update_file_tg_id(file_id, new_file_id)
             else:
                 await query.answer('文件丢失', show_alert=True)
                 return
@@ -147,12 +122,7 @@ async def search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def ss_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('SELECT vip_level FROM users WHERE user_id=?', (user_id,))
-    row = c.fetchone()
-    conn.close()
-    vip_level = row[0] if row else 0
+    vip_level = get_user_vip_level(user_id)
     if vip_level < 2:
         await update.message.reply_text('只有VIP2及以上用户才能使用此命令。')
         return
