@@ -467,7 +467,7 @@ async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 elif os.path.exists(file_path):
                     with open(file_path, 'rb') as f:
                         input_file = InputFile(f, read_file_handle=False)
-                        msg = await update.message.reply_document(input_file, caption='本地文件直传')
+                        msg = await update.message.reply_document(input_file, caption='本地文件直传', write_timeout=300, connect_timeout=30)
                         #msg = await update.message.reply_document(f, caption='本地文件直传')
                         new_file_id = msg.document.file_id
                 else:
