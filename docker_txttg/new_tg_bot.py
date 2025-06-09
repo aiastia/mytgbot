@@ -500,8 +500,13 @@ def main():
     upgrade_users_table()  # 启动时自动升级users表结构
     base_url = os.getenv('TELEGRAM_API_URL')
     builder = ApplicationBuilder().token(TOKEN)
+   # if base_url:
+        #builder = builder.base_url(f"{base_url}/bot").base_file_url(f"{base_url}/file/bot") 
     if base_url:
-        builder = builder.base_url(f"{base_url}/bot").base_file_url(f"{base_url}/file/bot").local_mode=True.request_kwargs={'timeout': 300} 
+        builder.base_url(f"{base_url}/bot")
+        builder.base_file_url(f"{base_url}/file/bot")
+        builder.local_mode(True)
+        builder.request_kwargs({'timeout': 300})
     app = builder.build()
 
     # 用 post_init 钩子自动注入 bot 用户名
