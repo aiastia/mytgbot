@@ -506,7 +506,6 @@ def main():
         builder.base_url(f"{base_url}/bot")
         builder.base_file_url(f"{base_url}/file/bot")
         builder.local_mode(True)
-        builder.request_kwargs({'timeout': 300})
     app = builder.build()
 
     # 用 post_init 钩子自动注入 bot 用户名
