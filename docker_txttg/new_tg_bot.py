@@ -501,7 +501,7 @@ def main():
     base_url = os.getenv('TELEGRAM_API_URL')
     builder = ApplicationBuilder().token(TOKEN)
     if base_url:
-        builder = builder.base_url(f"{base_url}/bot").base_file_url(f"{base_url}/file/bot")
+        builder = builder.base_url(f"{base_url}/bot").base_file_url(f"{base_url}/file/bot").local_mode=True.request_kwargs={'timeout': 300} 
     app = builder.build()
 
     # 用 post_init 钩子自动注入 bot 用户名
