@@ -10,7 +10,7 @@ from search_file import ss_callback
 from orm_utils import SessionLocal, init_db
 from orm_models import User, File, SentFile, FileFeedback
 from db_migrate import migrate_db  # 导入数据库迁移函数
-
+from telegram.request import HTTPXRequest 
 # 加载环境变量
 load_dotenv()
 TOKEN = os.getenv('BOT_TOKEN')
@@ -499,7 +499,14 @@ async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     upgrade_users_table()  # 启动时自动升级users表结构
     base_url = os.getenv('TELEGRAM_API_URL')
-    builder = ApplicationBuilder().token(TOKEN)
+    request = HTTPXRequest(
+        connect_timeout=60,   # Connection timeout
+        read_timeout=1810,    # Should be > TDLIB_UPLOAD_FILE_TIMEOUT
+        write_timeout=1810,   # Should be > TDLIB_UPLOAD_FILE_TIMEOUT
+        pool_timeout=60,       # Pool timeout
+        media_write_timeout=1810
+    )
+    builder = ApplicationBuilder().token(TOKEN).request(request)
     if base_url:
         builder = builder.base_url(f"{base_url}/bot").base_file_url(f"{base_url}/file/bot")
     app = builder.build()
