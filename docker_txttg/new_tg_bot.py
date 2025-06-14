@@ -93,6 +93,7 @@ def mark_file_sent(user_id, file_id):
     with SessionLocal() as session:
         date = datetime.now().strftime('%Y-%m-%d')
         session.merge(SentFile(user_id=user_id, file_id=file_id, date=date))
+        session.commit()
 
 def get_today_sent_count(user_id):
     with SessionLocal() as session:
@@ -143,6 +144,7 @@ def record_feedback(user_id, file_id, feedback):
     with SessionLocal() as session:
         date = datetime.now().strftime('%Y-%m-%d')
         session.merge(FileFeedback(user_id=user_id, file_id=file_id, feedback=feedback, date=date))
+        session.commit()
 
 def get_unsent_files(user_id):
     all_files = get_all_txt_files()
