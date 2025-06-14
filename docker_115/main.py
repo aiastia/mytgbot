@@ -12,7 +12,7 @@ import requests
 import qrcode
 import io
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters, ConversationHandler
 
 # 配置
 CLIENT_ID = 100195135  # 替换为你自己的 client_id
@@ -25,6 +25,9 @@ REFRESH_TOKEN_URL = "https://passportapi.115.com/open/refreshToken"
 MAGNET_API_URL = "https://proapi.115.com/open/offline/add_task_urls"
 
 logging.basicConfig(level=logging.INFO)
+
+# 定义对话状态
+BINDING = 1
 
 def user_token_file(user_id):
     os.makedirs(USER_TOKEN_DIR, exist_ok=True)
@@ -59,7 +62,7 @@ async def bind(update: Update, context: ContextTypes.DEFAULT_TYPE):
     token_info = read_token(user_id)
     if token_info:
         await update.message.reply_text("你已经绑定过账号了。如果需要重新绑定，请先使用 /unbind 解绑。")
-        return
+        return ConversationHandler.END
 
     # 生成新的二维码
     verifier = generate_code_verifier()
@@ -72,7 +75,8 @@ async def bind(update: Update, context: ContextTypes.DEFAULT_TYPE):
     })
     result = resp.json()
     if result.get("code") != 0:
-        await update.message.reply_text("获取二维码失败。"); return
+        await update.message.reply_text("获取二维码失败。")
+        return ConversationHandler.END
 
     data = result["data"]
     
@@ -90,78 +94,89 @@ async def bind(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 发送二维码图片给用户
     await update.message.reply_photo(bio, caption="请使用115客户端扫描二维码。\n二维码有效期为5分钟，过期后将自动刷新。\n如果想取消绑定，请发送 /cancel")
 
-    # 等待扫码轮询
-    max_retries = 3  # 最大重试次数
-    retry_count = 0
+    # 保存状态到上下文
+    context.user_data['bind_data'] = {
+        'verifier': verifier,
+        'challenge': challenge,
+        'data': data,
+        'retry_count': 0
+    }
     
-    while retry_count < max_retries:
-        for _ in range(60):
-            # 检查是否有新的消息
-            try:
-                # 获取最新的消息
-                latest_message = await context.bot.get_updates(offset=-1, timeout=1)
-                if latest_message and latest_message[0].message:
-                    if latest_message[0].message.text == "/cancel":
-                        await update.message.reply_text("已取消绑定过程。")
-                        return
-            except:
-                pass
+    return BINDING
 
-            status = requests.get(QRCODE_STATUS_URL, params={
-                "uid": data["uid"],
-                "time": data["time"],
-                "sign": data["sign"]
-            }).json()
-            
-            if status["data"].get("status") == 2:
-                # 扫码成功，获取token
-                token_resp = requests.post(DEVICE_CODE_TO_TOKEN_URL, data={
-                    "uid": data["uid"],
-                    "code_verifier": verifier
-                }).json()
-                if token_resp.get("code") == 0:
-                    write_token(user_id, token_resp["data"])
-                    await update.message.reply_text("绑定成功！现在你可以发送磁力链接了。")
-                    return
-                else:
-                    await update.message.reply_text("绑定失败，请重试。")
-                    return
-                    
-            elif status["data"].get("status") == 3:
-                # 二维码过期，重新获取
-                break
-                
-            time.sleep(3)
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # 检查是否有正在进行的绑定过程
+    if 'bind_data' not in context.user_data:
+        await update.message.reply_text("当前没有正在进行的绑定过程。")
+        return ConversationHandler.END
         
-        # 如果到这里，说明二维码过期或超时
-        retry_count += 1
-        if retry_count < max_retries:
-            # 重新获取二维码
-            resp = requests.post(AUTH_DEVICE_CODE_URL, data={
-                "client_id": CLIENT_ID,
-                "code_challenge": challenge,
-                "code_challenge_method": "sha256"
-            })
-            result = resp.json()
-            if result.get("code") != 0:
-                await update.message.reply_text("重新获取二维码失败。"); return
-                
-            data = result["data"]
-            
-            # 生成新的二维码图片
-            qr = qrcode.QRCode(version=1, box_size=10, border=5)
-            qr.add_data(data["qrcode"])
-            qr.make(fit=True)
-            img = qr.make_image(fill_color="black", back_color="white")
-            
-            bio = io.BytesIO()
-            img.save(bio, 'PNG')
-            bio.seek(0)
-            
-            await update.message.reply_photo(bio, caption=f"二维码已刷新，请重新扫描。\n这是第 {retry_count + 1} 次尝试，还剩 {max_retries - retry_count - 1} 次机会。\n如果想取消绑定，请发送 /cancel")
+    # 清除绑定数据
+    context.user_data.pop('bind_data', None)
+    await update.message.reply_text("已取消绑定过程。")
+    return ConversationHandler.END
+
+async def handle_binding(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    bind_data = context.user_data.get('bind_data')
+    
+    if not bind_data:
+        await update.message.reply_text("绑定过程已结束，请重新使用 /bind 命令。")
+        return ConversationHandler.END
+
+    # 检查二维码状态
+    status = requests.get(QRCODE_STATUS_URL, params={
+        "uid": bind_data['data']["uid"],
+        "time": bind_data['data']["time"],
+        "sign": bind_data['data']["sign"]
+    }).json()
+    
+    if status["data"].get("status") == 2:
+        # 扫码成功，获取token
+        token_resp = requests.post(DEVICE_CODE_TO_TOKEN_URL, data={
+            "uid": bind_data['data']["uid"],
+            "code_verifier": bind_data['verifier']
+        }).json()
+        if token_resp.get("code") == 0:
+            write_token(user_id, token_resp["data"])
+            await update.message.reply_text("绑定成功！现在你可以发送磁力链接了。")
+            return ConversationHandler.END
         else:
+            await update.message.reply_text("绑定失败，请重试。")
+            return ConversationHandler.END
+            
+    elif status["data"].get("status") == 3:
+        # 二维码过期，重新获取
+        bind_data['retry_count'] += 1
+        if bind_data['retry_count'] >= 3:
             await update.message.reply_text("二维码已过期且达到最大重试次数，请重新使用 /bind 命令。")
-            return
+            return ConversationHandler.END
+            
+        # 重新获取二维码
+        resp = requests.post(AUTH_DEVICE_CODE_URL, data={
+            "client_id": CLIENT_ID,
+            "code_challenge": bind_data['challenge'],
+            "code_challenge_method": "sha256"
+        })
+        result = resp.json()
+        if result.get("code") != 0:
+            await update.message.reply_text("重新获取二维码失败。")
+            return ConversationHandler.END
+            
+        bind_data['data'] = result["data"]
+        
+        # 生成新的二维码图片
+        qr = qrcode.QRCode(version=1, box_size=10, border=5)
+        qr.add_data(bind_data['data']["qrcode"])
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        
+        bio = io.BytesIO()
+        img.save(bio, 'PNG')
+        bio.seek(0)
+        
+        await update.message.reply_photo(bio, caption=f"二维码已刷新，请重新扫描。\n这是第 {bind_data['retry_count'] + 1} 次尝试，还剩 {3 - bind_data['retry_count'] - 1} 次机会。\n如果想取消绑定，请发送 /cancel")
+    
+    return BINDING
 
 async def unbind(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -172,9 +187,6 @@ async def unbind(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("已成功解绑账号。")
     else:
         await update.message.reply_text("你还没有绑定账号。")
-
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("当前没有正在进行的绑定过程。")
 
 def refresh_user_token(user_id, token_info):
     """刷新用户的 token"""
@@ -261,8 +273,20 @@ if __name__ == "__main__":
 
     app = ApplicationBuilder().token(TOKEN).build()
 
+    # 创建对话处理器
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("bind", bind)],
+        states={
+            BINDING: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_binding)
+            ]
+        },
+        fallbacks=[],
+        allow_reentry=True
+    )
+
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("bind", bind))
+    app.add_handler(conv_handler)
     app.add_handler(CommandHandler("unbind", unbind))
     app.add_handler(CommandHandler("cancel", cancel))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_magnet))
