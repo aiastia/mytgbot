@@ -93,6 +93,7 @@ def mark_file_sent(user_id, file_id):
     with SessionLocal() as session:
         date = datetime.now().strftime('%Y-%m-%d')
         session.merge(SentFile(user_id=user_id, file_id=file_id, date=date))
+        session.commit()
 
 def get_today_sent_count(user_id):
     with SessionLocal() as session:
