@@ -1,0 +1,270 @@
+# Tg bot + 115 磁力推送示例
+import os
+import json
+import time
+import logging
+import qrcode_terminal
+import hashlib
+import base64
+import string
+import secrets
+import requests
+import qrcode
+import io
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+
+# 配置
+CLIENT_ID = 100195135  # 替换为你自己的 client_id
+USER_TOKEN_DIR = "user_tokens"
+
+AUTH_DEVICE_CODE_URL = "https://passportapi.115.com/open/authDeviceCode"
+QRCODE_STATUS_URL = "https://qrcodeapi.115.com/get/status/"
+DEVICE_CODE_TO_TOKEN_URL = "https://passportapi.115.com/open/deviceCodeToToken"
+REFRESH_TOKEN_URL = "https://passportapi.115.com/open/refreshToken"
+MAGNET_API_URL = "https://proapi.115.com/open/offline/add_task_urls"
+
+logging.basicConfig(level=logging.INFO)
+
+def user_token_file(user_id):
+    os.makedirs(USER_TOKEN_DIR, exist_ok=True)
+    return os.path.join(USER_TOKEN_DIR, f"{user_id}.json")
+
+def read_token(user_id):
+    try:
+        with open(user_token_file(user_id), "r", encoding="utf-8") as f:
+            return json.load(f)
+    except:
+        return None
+
+def write_token(user_id, token_data):
+    with open(user_token_file(user_id), "w", encoding="utf-8") as f:
+        json.dump(token_data, f, ensure_ascii=False, indent=2)
+
+def generate_code_verifier(length=128):
+    allowed_chars = string.ascii_letters + string.digits + "-._~"
+    return ''.join(secrets.choice(allowed_chars) for _ in range(length))
+
+def generate_code_challenge(verifier):
+    sha = hashlib.sha256(verifier.encode()).digest()
+    return base64.urlsafe_b64encode(sha).rstrip(b"=").decode()
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("欢迎使用 115 推送 Bot。请使用 /bind 开始绑定你的账号。")
+
+async def bind(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    
+    # 检查是否已绑定
+    token_info = read_token(user_id)
+    if token_info:
+        await update.message.reply_text("你已经绑定过账号了。如果需要重新绑定，请先使用 /unbind 解绑。")
+        return
+
+    # 生成新的二维码
+    verifier = generate_code_verifier()
+    challenge = generate_code_challenge(verifier)
+
+    resp = requests.post(AUTH_DEVICE_CODE_URL, data={
+        "client_id": CLIENT_ID,
+        "code_challenge": challenge,
+        "code_challenge_method": "sha256"
+    })
+    result = resp.json()
+    if result.get("code") != 0:
+        await update.message.reply_text("获取二维码失败。"); return
+
+    data = result["data"]
+    
+    # 生成二维码图片
+    qr = qrcode.QRCode(version=1, box_size=10, border=5)
+    qr.add_data(data["qrcode"])
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    
+    # 将图片转换为字节流
+    bio = io.BytesIO()
+    img.save(bio, 'PNG')
+    bio.seek(0)
+    
+    # 发送二维码图片给用户
+    await update.message.reply_photo(bio, caption="请使用115客户端扫描二维码。\n二维码有效期为5分钟，过期后将自动刷新。\n如果想取消绑定，请发送 /cancel")
+
+    # 等待扫码轮询
+    max_retries = 3  # 最大重试次数
+    retry_count = 0
+    
+    while retry_count < max_retries:
+        for _ in range(60):
+            # 检查是否有新的消息
+            try:
+                # 获取最新的消息
+                latest_message = await context.bot.get_updates(offset=-1, timeout=1)
+                if latest_message and latest_message[0].message:
+                    if latest_message[0].message.text == "/cancel":
+                        await update.message.reply_text("已取消绑定过程。")
+                        return
+            except:
+                pass
+
+            status = requests.get(QRCODE_STATUS_URL, params={
+                "uid": data["uid"],
+                "time": data["time"],
+                "sign": data["sign"]
+            }).json()
+            
+            if status["data"].get("status") == 2:
+                # 扫码成功，获取token
+                token_resp = requests.post(DEVICE_CODE_TO_TOKEN_URL, data={
+                    "uid": data["uid"],
+                    "code_verifier": verifier
+                }).json()
+                if token_resp.get("code") == 0:
+                    write_token(user_id, token_resp["data"])
+                    await update.message.reply_text("绑定成功！现在你可以发送磁力链接了。")
+                    return
+                else:
+                    await update.message.reply_text("绑定失败，请重试。")
+                    return
+                    
+            elif status["data"].get("status") == 3:
+                # 二维码过期，重新获取
+                break
+                
+            time.sleep(3)
+        
+        # 如果到这里，说明二维码过期或超时
+        retry_count += 1
+        if retry_count < max_retries:
+            # 重新获取二维码
+            resp = requests.post(AUTH_DEVICE_CODE_URL, data={
+                "client_id": CLIENT_ID,
+                "code_challenge": challenge,
+                "code_challenge_method": "sha256"
+            })
+            result = resp.json()
+            if result.get("code") != 0:
+                await update.message.reply_text("重新获取二维码失败。"); return
+                
+            data = result["data"]
+            
+            # 生成新的二维码图片
+            qr = qrcode.QRCode(version=1, box_size=10, border=5)
+            qr.add_data(data["qrcode"])
+            qr.make(fit=True)
+            img = qr.make_image(fill_color="black", back_color="white")
+            
+            bio = io.BytesIO()
+            img.save(bio, 'PNG')
+            bio.seek(0)
+            
+            await update.message.reply_photo(bio, caption=f"二维码已刷新，请重新扫描。\n这是第 {retry_count + 1} 次尝试，还剩 {max_retries - retry_count - 1} 次机会。\n如果想取消绑定，请发送 /cancel")
+        else:
+            await update.message.reply_text("二维码已过期且达到最大重试次数，请重新使用 /bind 命令。")
+            return
+
+async def unbind(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    token_file = user_token_file(user_id)
+    
+    if os.path.exists(token_file):
+        os.remove(token_file)
+        await update.message.reply_text("已成功解绑账号。")
+    else:
+        await update.message.reply_text("你还没有绑定账号。")
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("当前没有正在进行的绑定过程。")
+
+def refresh_user_token(user_id, token_info):
+    """刷新用户的 token"""
+    try:
+        refresh_resp = requests.post(REFRESH_TOKEN_URL, data={
+            "client_id": CLIENT_ID,
+            "refresh_token": token_info.get("refresh_token")
+        })
+        
+        if refresh_resp.status_code == 200:
+            refresh_data = refresh_resp.json()
+            if refresh_data.get("code") == 0:
+                token_info["access_token"] = refresh_data["data"]["access_token"]
+                token_info["refresh_token"] = refresh_data["data"]["refresh_token"]
+                write_token(user_id, token_info)
+                return True
+        return False
+    except Exception as e:
+        print(f"Token refresh error: {str(e)}")
+        return False
+
+async def handle_magnet(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    token_info = read_token(user_id)
+    if not token_info:
+        await update.message.reply_text("你还没有绑定账号，请先使用 /bind")
+        return
+
+    magnet = update.message.text.strip()
+    if not magnet.startswith("magnet:?"):
+        await update.message.reply_text("请发送正确的磁力链接，以 magnet:? 开头")
+        return
+
+    try:
+        # 刷新 token
+        if not refresh_user_token(user_id, token_info):
+            await update.message.reply_text("token 刷新失败，请重新绑定账号")
+            return
+
+        headers = {
+            "Authorization": f"Bearer {token_info['access_token']}"
+        }
+        print(headers)
+        
+        resp = requests.post(MAGNET_API_URL, data={
+            "urls": magnet,
+            "wp_path_id": "0"  # 默认保存到根目录
+        }, headers=headers)
+        
+        if resp.status_code == 200 and resp.headers.get("Content-Type", "").startswith("application/json"):
+            result = resp.json()
+            print(f"Parsed JSON Result: {result}")
+            
+            if result.get("state"):
+                if result.get("data") and result["data"][0].get("state"):
+                    await update.message.reply_text("磁力链接已成功添加到 115 离线下载。")
+                else:
+                    error_msg = result["data"][0].get("message", "未知错误") if result.get("data") else "未知错误"
+                    await update.message.reply_text(f"添加失败：{error_msg}")
+            else:
+                error_msg = result.get("message", "未知错误")
+                await update.message.reply_text(f"添加失败：{error_msg}")
+        else:
+            await update.message.reply_text("添加任务失败：服务器返回了非预期的响应")
+            
+    except requests.exceptions.RequestException as e:
+        print(f"Request Error: {str(e)}")
+        await update.message.reply_text(f"添加任务失败：网络请求错误 - {str(e)}")
+    except json.JSONDecodeError as e:
+        print(f"JSON Parse Error: {str(e)}")
+        print(f"Raw Response: {resp.text}")
+        await update.message.reply_text("添加任务失败：服务器响应格式错误")
+    except Exception as e:
+        print(f"Unexpected Error: {str(e)}")
+        await update.message.reply_text(f"添加任务失败：{str(e)}")
+
+if __name__ == "__main__":
+    import asyncio
+    import sys
+
+    TOKEN = os.getenv("TG_BOT_TOKEN") or "5995725266:AAG1yDLgNJK9Ib9Mw4yHQs9qv0pofZTi_Og"
+    if not TOKEN:
+        sys.exit("请设置 TG_BOT_TOKEN 环境变量或在代码中填写 token")
+
+    app = ApplicationBuilder().token(TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("bind", bind))
+    app.add_handler(CommandHandler("unbind", unbind))
+    app.add_handler(CommandHandler("cancel", cancel))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_magnet))
+
+    app.run_polling()

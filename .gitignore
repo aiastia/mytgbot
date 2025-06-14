@@ -4,5 +4,4 @@
 __pycache__/
 *.pyc
 token.txt
-docker_115/token_manager.py
-docker_115/main.py
+user_tokens/*.json
