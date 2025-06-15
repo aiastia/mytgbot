@@ -13,18 +13,36 @@ import qrcode
 import io
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters, ConversationHandler
+from dotenv import load_dotenv
+
+# 尝试加载 .env 文件（如果存在）
+load_dotenv(override=True)
+
+# 配置日志
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# 从环境变量或 .env 文件获取配置
+def get_config(key, default=None):
+    """获取配置，优先从 .env 文件读取，如果没有则从环境变量读取"""
+    value = os.getenv(key, default)
+    logger.info(f"Loading config {key}: {'*' * len(str(value)) if 'TOKEN' in key else value}")
+    return value
 
 # 配置
-CLIENT_ID = 100195135  # 替换为你自己的 client_id
-USER_TOKEN_DIR = "user_tokens"
+CLIENT_ID = int(get_config("CLIENT_ID", "100195135"))  # 115 client_id
+USER_TOKEN_DIR = get_config("USER_TOKEN_DIR", "user_tokens")
+ADMIN_IDS = [int(id.strip()) for id in get_config("ADMIN_IDS", "").split(",") if id.strip()]
 
+# API URLs
 AUTH_DEVICE_CODE_URL = "https://passportapi.115.com/open/authDeviceCode"
 QRCODE_STATUS_URL = "https://qrcodeapi.115.com/get/status/"
 DEVICE_CODE_TO_TOKEN_URL = "https://passportapi.115.com/open/deviceCodeToToken"
 REFRESH_TOKEN_URL = "https://passportapi.115.com/open/refreshToken"
 MAGNET_API_URL = "https://proapi.115.com/open/offline/add_task_urls"
-
-logging.basicConfig(level=logging.INFO)
 
 # 定义对话状态
 BINDING = 1
@@ -208,7 +226,20 @@ def refresh_user_token(user_id, token_info):
         print(f"Token refresh error: {str(e)}")
         return False
 
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """处理错误"""
+    logger.error(f"Exception while handling an update: {context.error}")
+    if update and update.effective_message:
+        await update.effective_message.reply_text(
+            "抱歉，处理您的请求时出现错误。请稍后重试。"
+        )
+
 async def handle_magnet(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """处理磁力链接"""
+    if not update or not update.effective_user:
+        logger.warning("Received update without user information")
+        return
+
     user_id = update.effective_user.id
     token_info = read_token(user_id)
     if not token_info:
@@ -229,7 +260,7 @@ async def handle_magnet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         headers = {
             "Authorization": f"Bearer {token_info['access_token']}"
         }
-        print(headers)
+        logger.debug(f"Request headers: {headers}")
         
         resp = requests.post(MAGNET_API_URL, data={
             "urls": magnet,
@@ -238,7 +269,7 @@ async def handle_magnet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if resp.status_code == 200 and resp.headers.get("Content-Type", "").startswith("application/json"):
             result = resp.json()
-            print(f"Parsed JSON Result: {result}")
+            logger.debug(f"API Response: {result}")
             
             if result.get("state"):
                 if result.get("data") and result["data"][0].get("state"):
@@ -253,23 +284,25 @@ async def handle_magnet(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("添加任务失败：服务器返回了非预期的响应")
             
     except requests.exceptions.RequestException as e:
-        print(f"Request Error: {str(e)}")
+        logger.error(f"Request Error: {str(e)}")
         await update.message.reply_text(f"添加任务失败：网络请求错误 - {str(e)}")
     except json.JSONDecodeError as e:
-        print(f"JSON Parse Error: {str(e)}")
-        print(f"Raw Response: {resp.text}")
+        logger.error(f"JSON Parse Error: {str(e)}")
+        logger.error(f"Raw Response: {resp.text}")
         await update.message.reply_text("添加任务失败：服务器响应格式错误")
     except Exception as e:
-        print(f"Unexpected Error: {str(e)}")
+        logger.error(f"Unexpected Error: {str(e)}")
         await update.message.reply_text(f"添加任务失败：{str(e)}")
 
 if __name__ == "__main__":
     import asyncio
     import sys
 
-    TOKEN = os.getenv("TG_BOT_TOKEN") or "5995725266:AAG1yDLgNJK9Ib9Mw4yHQs9qv0pofZTi_Og"
+    # 从环境变量或 .env 文件获取 Telegram Bot Token
+    TOKEN = get_config("BOT_TOKEN")
     if not TOKEN:
-        sys.exit("请设置 TG_BOT_TOKEN 环境变量或在代码中填写 token")
+        logger.error("BOT_TOKEN not found in environment variables or .env file")
+        sys.exit("请设置 BOT_TOKEN 环境变量或在 .env 文件中配置")
 
     app = ApplicationBuilder().token(TOKEN).build()
 
@@ -281,9 +314,12 @@ if __name__ == "__main__":
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_binding)
             ]
         },
-        fallbacks=[],
+        fallbacks=[CommandHandler("cancel", cancel)],
         allow_reentry=True
     )
+
+    # 添加错误处理器
+    app.add_error_handler(error_handler)
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(conv_handler)
@@ -291,4 +327,5 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("cancel", cancel))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_magnet))
 
+    logger.info("Starting bot...")
     app.run_polling()
