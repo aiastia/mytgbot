@@ -9,7 +9,7 @@ from orm_models import UploadedDocument, User
 ALLOWED_EXTENSIONS = {'.txt', '.epub', '.pdf', '.mobi'}
 
 # 下载目录
-DOWNLOAD_DIR = os.path.join(os.getenv('TXT_ROOT', '/app/share_folder'), 'downloaded_docs')
+DOWNLOAD_DIR = os.path.join(os.getenv('TXT_ROOT', '/app/share_folder'), 'downloaded_docs').replace('\\', '/')
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -114,6 +114,11 @@ async def handle_document_callback(update: Update, context: ContextTypes.DEFAULT
             )
             
         elif action == "approve_download":
+            # 检查文件是否已经被下载
+            if doc.is_downloaded and doc.download_path and os.path.exists(doc.download_path):
+                await query.answer("文件已经被其他管理员下载过了")
+                return
+                
             doc.status = 'approved'
             doc.approved_by = user_id
             doc.is_downloaded = True
@@ -128,7 +133,7 @@ async def handle_document_callback(update: Update, context: ContextTypes.DEFAULT
                     raise Exception("无法获取文件信息")
 
                 # 下载文件
-                download_path = os.path.join(DOWNLOAD_DIR, doc.file_name)
+                download_path = os.path.join(DOWNLOAD_DIR, doc.file_name).replace('\\', '/')
                 
                 # 使用download_to_drive下载文件
                 print(f"Downloading to: {download_path}")  # 调试信息
