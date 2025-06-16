@@ -1,0 +1,48 @@
+name: docker-image
+
+on:
+  push:
+    branches:
+      - 'main'
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - 'text'
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - context: ./docker_code
+            file: ./docker_code/Dockerfile
+            tag: code
+          - context: ./docker_txttg
+            file: ./docker_txttg/Dockerfile
+            tag: txt
+          - context: ./docker_115
+            file: ./docker_115/Dockerfile
+            tag: 115
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: aiastia/mytgbot
+      - name: Login to DockerHub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Build and push
+        uses: docker/build-push-action@v3
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: aiastia/mytgbot:${{ matrix.tag }}
