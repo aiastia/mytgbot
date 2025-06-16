@@ -1,4 +1,3 @@
-import os
 from orm_utils import get_engine, init_db
 from sqlalchemy import text, inspect
 from orm_models import Base

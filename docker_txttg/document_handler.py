@@ -3,7 +3,7 @@ from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from orm_utils import SessionLocal
-from orm_models import UploadedDocument, User
+from orm_models import UploadedDocument
 
 # 允许的文件类型
 ALLOWED_EXTENSIONS = {'.txt', '.epub', '.pdf', '.mobi'}

@@ -1,17 +1,17 @@
 import os
 import random
 from datetime import datetime, timedelta
-from telegram import Update, Bot, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram import InputFile
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
 from dotenv import load_dotenv
-from search_file import search_command, search_callback, ss_command, set_bot_username, split_message
+from search_file import search_command, search_callback, ss_command, set_bot_username
 from search_file import ss_callback
 from orm_utils import SessionLocal, init_db
 from orm_models import User, File, SentFile, FileFeedback, UploadedDocument
 from db_migrate import migrate_db  # 导入数据库迁移函数
 from document_handler import handle_document, handle_document_callback
-from telegram.request import HTTPXRequest 
+from telegram.request import HTTPXRequest
+
 # 加载环境变量
 load_dotenv()
 TOKEN = os.getenv('BOT_TOKEN')
