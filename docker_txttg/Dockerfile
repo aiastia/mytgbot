@@ -7,4 +7,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 # COPY new_tg_bot.py .
 
-CMD ["python", "new_tg_bot.py"]
+CMD ["python", "main.py"]
