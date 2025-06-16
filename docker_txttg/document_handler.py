@@ -28,12 +28,22 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 检查是否重复
     with SessionLocal() as session:
+        # 检查文件名和大小
         existing = session.query(UploadedDocument).filter_by(
             file_name=document.file_name,
             file_size=document.file_size
         ).first()
         
         if existing:
+            await update.message.reply_text("该文件已经上传过了。")
+            return
+            
+        # 检查 tg_file_id
+        existing_by_tg_id = session.query(UploadedDocument).filter_by(
+            tg_file_id=document.file_id
+        ).first()
+        
+        if existing_by_tg_id:
             await update.message.reply_text("该文件已经上传过了。")
             return
 
