@@ -5,7 +5,7 @@ services:
     image: aiastia/mytgbot:txt
     volumes:
       - ./data:/app/data/
-      - ./share_folder:/app/share_folder:ro
+      - ./share_folder:/app/share_folder
     restart: unless-stopped
     environment:
       - TZ=Asia/Shanghai
