@@ -86,7 +86,7 @@ def calculate_points_for_days(level: int, days: int, current_level: int = 0) -> 
     for pkg_level, pkg_days, points, _ in VIP_PACKAGES:
         if pkg_level == level and pkg_days == closest_days:
             # 判断是否为新购（current_level = 0）或升级（level > current_level）
-            is_new_or_upgrade = (level > current_level)
+            is_new_or_upgrade = (current_level != 0 and level > current_level)
             # 按比例计算积分
             if closest_days <= 7:  # 短期套餐（3天和7天）
                 if is_new_or_upgrade:  # 新购或升级时按9折计算
