@@ -1,0 +1,4 @@
+python-telegram-bot>=22.1
+python-dotenv
+sqlalchemy>=2.0
+pymysql>=1.0

@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  newtg:
+    image: aiastia/mytgbot:txt
+    volumes:
+      - ./data:/app/data/
+      - ./share_folder:/app/share_folder
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
+      - BOT_TOKEN=${BOT_TOKEN}
+      - ADMIN_USER_ID=123456789
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
