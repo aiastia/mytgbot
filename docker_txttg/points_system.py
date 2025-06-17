@@ -70,7 +70,7 @@ def update_last_checkin(user_id: int):
             user.last_checkin = datetime.now().strftime('%Y-%m-%d')
             session.commit()
 
-def calculate_points_for_days(level: int, days: int) -> int:
+def calculate_points_for_days(level: int, days: int, current_level: int = 0) -> int:
     """根据套餐配置计算指定等级和天数的积分价值"""
     # 找到最接近的套餐天数
     closest_days = min(VIP_DAYS, key=lambda x: abs(x - days))
@@ -80,7 +80,10 @@ def calculate_points_for_days(level: int, days: int) -> int:
         if pkg_level == level and pkg_days == closest_days:
             # 按比例计算积分
             if closest_days <= 7:  # 短期套餐（3天和7天）
-                return int(points * 0.9)  # 短期套餐按9折计算
+                if level > current_level:  # 升级时按9折计算
+                    return int(points * 0.9)
+                else:  # 续期时按原价计算
+                    return points
             else:  # 长期套餐（30天及以上）
                 return int(points * (days / closest_days))
     return 0  # 无效的组合返回0
@@ -211,10 +214,10 @@ async def exchange_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     expiry_date = datetime.strptime(user.vip_expiry_date, '%Y-%m-%d')
                     if datetime.now().date() <= expiry_date.date():
                         remaining_days = (expiry_date - datetime.now()).days
-                        current_points = calculate_points_for_days(current_level, remaining_days)
+                        current_points = calculate_points_for_days(current_level, remaining_days, current_level)
                 
                 # 计算目标套餐所需积分
-                target_points = calculate_points_for_days(level, days)
+                target_points = calculate_points_for_days(level, days, current_level)
                 
                 # 计算实际需要扣除的积分
                 if level == current_level:
@@ -345,7 +348,7 @@ def upgrade_vip_level(user_id: int, target_level: int, target_days: int) -> tupl
             return False, "不能降级VIP等级"
         
         # 计算目标套餐所需积分
-        target_points = calculate_points_for_days(target_level, target_days)
+        target_points = calculate_points_for_days(target_level, target_days, user.vip_level if user.vip_level else 0)
         if target_points == 0:
             return False, "无效的套餐组合"
         
@@ -362,7 +365,7 @@ def upgrade_vip_level(user_id: int, target_level: int, target_days: int) -> tupl
                 # 计算剩余天数
                 remaining_days = (current_expiry - datetime.now()).days
                 # 计算当前等级剩余时间的等效积分
-                current_points = calculate_points_for_days(user.vip_level, remaining_days)
+                current_points = calculate_points_for_days(user.vip_level, remaining_days, user.vip_level)
                 # 如果是升级，检查天数是否合法
                 if target_level > user.vip_level:
                     # 不允许降级天数
