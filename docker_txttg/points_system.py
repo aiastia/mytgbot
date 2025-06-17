@@ -6,7 +6,7 @@ from orm_utils import SessionLocal
 from orm_models import User
 
 # VIP套餐配置
-VIP_DAYS = [3, 7, 15, 30, 90, 180, 365]  # 所有有效的VIP套餐天数
+VIP_DAYS = [3, 7, 30, 90, 180, 365]  # 所有有效的VIP套餐天数
 
 # VIP套餐配置
 VIP_PACKAGES = [
