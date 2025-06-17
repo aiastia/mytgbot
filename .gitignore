@@ -5,3 +5,5 @@ __pycache__/
 *.pyc
 token.txt
 user_tokens/*.json
+*.session
+*.txt
