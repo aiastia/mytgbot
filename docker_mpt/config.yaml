@@ -10,6 +10,9 @@ accounts:
     admin_ids: []  # 此账户的管理员ID列表
     monitoring:
       enabled_chats: []  # 此账户监控的聊天ID列表
+      monitor_private_bots: true  # 是否监控与机器人的私聊
+      bot_usernames: []  # 要监控的机器人用户名列表，为空则监控所有机器人
+      auto_forward_media: true  # 是否自动转发媒体文件（不需要关键词）
     keywords: []  # 此账户的关键词列表
     forwarding:
       rules: []  # 此账户的转发规则
@@ -25,6 +28,9 @@ accounts:
     admin_ids: []
     monitoring:
       enabled_chats: []
+      monitor_private_bots: true
+      bot_usernames: []
+      auto_forward_media: true
     keywords: []
     forwarding:
       rules: []
