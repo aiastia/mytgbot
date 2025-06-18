@@ -206,31 +206,46 @@ def get_unsent_files(user_id):
         sent_uploaded_ids = {record.file_id for record in sent_records if record.source == 'uploaded'}
         
         # 获取未发送的文件ID
-        unsent_file_ids = file_ids - sent_file_ids
-        unsent_uploaded_ids = uploaded_ids - sent_uploaded_ids
+        unsent_file_ids = list(file_ids - sent_file_ids)
+        unsent_uploaded_ids = list(uploaded_ids - sent_uploaded_ids)
         
-        # 获取未发送文件的完整信息
-        unsent = []
+        # 如果两个列表都为空，返回None
+        if not unsent_file_ids and not unsent_uploaded_ids:
+            return None
+            
+        # 随机选择一个未发送的文件ID
+        if unsent_file_ids and unsent_uploaded_ids:
+            # 如果两个列表都有内容，随机选择一个列表
+            if random.random() < 0.7:
+                file_id = random.choice(unsent_file_ids)
+                source = 'file'
+            else:
+                file_id = random.choice(unsent_uploaded_ids)
+                source = 'uploaded'
+        elif unsent_file_ids:
+            file_id = random.choice(unsent_file_ids)
+            source = 'file'
+        else:
+            file_id = random.choice(unsent_uploaded_ids)
+            source = 'uploaded'
         
-        # 获取未发送的File表文件信息
-        if unsent_file_ids:
-            files = session.query(File).filter(File.file_id.in_(unsent_file_ids)).all()
-            for file in files:
+        # 根据source和file_id获取文件信息
+        if source == 'file':
+            file = session.query(File).filter_by(file_id=file_id).first()
+            if file:
                 if file.tg_file_id:
-                    unsent.append(file.tg_file_id)
+                    return {'id': file_id, 'source': source, 'tg_file_id': file.tg_file_id}
                 elif file.file_path and os.path.exists(file.file_path):
-                    unsent.append(file.file_path)
-        
-        # 获取未发送的UploadedDocument表文件信息
-        if unsent_uploaded_ids:
-            uploaded_docs = session.query(UploadedDocument).filter(UploadedDocument.id.in_(unsent_uploaded_ids)).all()
-            for doc in uploaded_docs:
+                    return {'id': file_id, 'source': source, 'file_path': file.file_path}
+        else:
+            doc = session.query(UploadedDocument).filter_by(id=file_id).first()
+            if doc:
                 if doc.tg_file_id:
-                    unsent.append(doc.tg_file_id)
+                    return {'id': file_id, 'source': source, 'tg_file_id': doc.tg_file_id}
                 elif doc.download_path and os.path.exists(doc.download_path):
-                    unsent.append(doc.download_path)
+                    return {'id': file_id, 'source': source, 'file_path': doc.download_path}
         
-        return unsent
+        return None
 
 async def send_file_job(context: ContextTypes.DEFAULT_TYPE):
     """异步任务：发送文件"""
@@ -364,12 +379,11 @@ async def send_random_txt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if get_today_sent_count(user_id) >= daily_limit:
         await update.message.reply_text(f'每天最多只能领取{daily_limit}本，明天再来吧！')
         return
-    unsent_files = get_unsent_files(user_id)
-    if not unsent_files:
+    
+    file_info = get_unsent_files(user_id)
+    if not file_info:
         await update.message.reply_text('你已经收到了所有文件！')
         return
-    
-    file_id_or_path = random.choice(unsent_files)
     
     # 发送准备消息
     prep_message = await update.message.reply_text('正在准备发送文件...')
@@ -380,9 +394,10 @@ async def send_random_txt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         when=1,  # 1秒后开始执行
         data={
             'chat_id': update.effective_chat.id,
-            'file_id_or_path': file_id_or_path,
+            'file_id_or_path': file_info.get('tg_file_id') or file_info.get('file_path'),
             'user_id': user_id,
-            'prep_message_id': prep_message.message_id
+            'prep_message_id': prep_message.message_id,
+            'source': file_info['source']
         }
     )
 
