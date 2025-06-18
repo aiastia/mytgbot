@@ -318,36 +318,125 @@ async def cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.message.edit_text(msg, reply_markup=reply_markup)
-
 async def setvip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """设置用户VIP等级（仅管理员）"""
-    if update.effective_user.id not in ADMIN_IDS:
-        await update.message.reply_text("您没有权限执行此操作！")
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text('无权限，仅管理员可用。')
         return
-    
-    # 解析命令参数
+    if len(context.args) != 3:
+        await update.message.reply_text('用法：/setvip <user_id> <0/1/2/3> <天数>')
+        return
     try:
-        _, user_id, level, days = update.message.text.split()
-        user_id = int(user_id)
-        level = int(level)
-        days = int(days)
-    except ValueError:
-        await update.message.reply_text("格式错误！请使用：/setvip 用户ID 等级 天数")
+        target_id = int(context.args[0])
+        vip_level = int(context.args[1])
+        days = int(context.args[2])
+        if vip_level not in (0, 1, 2, 3):
+            raise ValueError
+        if days <= 0:
+            raise ValueError
+    except Exception:
+        await update.message.reply_text('参数错误。')
         return
     
-    # 验证参数
-    if level not in [1, 2, 3]:
-        await update.message.reply_text("无效的VIP等级！")
-        return
-    
-    if days not in VIP_DAYS:
-        await update.message.reply_text("无效的套餐天数！")
-        return
-    
-    # 设置VIP
-    success, message = upgrade_vip_level(user_id, level, days)
-    await update.message.reply_text(message)
+    # 获取用户当前VIP信息
+    with SessionLocal() as session:
+        user = session.query(User).filter_by(user_id=target_id).first()
+        if not user:
+            await update.message.reply_text('用户不存在。')
+            return
+        
+        now = datetime.now()
+        new_expiry_date = (now + timedelta(days=days)).strftime('%Y-%m-%d')
+        
+        if vip_level > 0:
+            # 如果是首次成为VIP，设置vip_date
+            if not user.vip_date:
+                user.vip_date = now.strftime('%Y-%m-%d')
+            
+            # 检查当前VIP状态
+            if user.vip_level > 0 and user.vip_expiry_date:
+                current_expiry = datetime.strptime(user.vip_expiry_date, '%Y-%m-%d')
+                new_expiry = datetime.strptime(new_expiry_date, '%Y-%m-%d')
+                
+                # 如果当前到期时间小于新设置的天数，使用新设置的天数
+                if current_expiry < new_expiry:
+                    user.vip_expiry_date = new_expiry_date
+                    await update.message.reply_text(f'用户 {target_id} VIP等级已设置为 {vip_level}，有效期更新为 {days} 天')
+                else:
+                    # 保持原到期时间不变
+                    await update.message.reply_text(f'用户 {target_id} VIP等级已设置为 {vip_level}，保持原到期时间不变')
+            else:
+                # 用户不是VIP，直接设置新的到期时间
+                user.vip_expiry_date = new_expiry_date
+                await update.message.reply_text(f'用户 {target_id} VIP等级已设置为 {vip_level}，有效期 {days} 天')
+            
+            user.vip_level = vip_level
+        else:
+            # 取消VIP
+            user.vip_level = 0
+            user.vip_expiry_date = None
+            await update.message.reply_text(f'用户 {target_id} VIP状态已取消')
+        
+        session.commit()
 
 async def setviplevel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """处理设置VIP等级命令（别名）"""
-    await setvip_command(update, context) 
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text('无权限，仅管理员可用。')
+        return
+    if len(context.args) != 2:
+        await update.message.reply_text('用法：/setviplevel <user_id> <0/1/2/3>')
+        return
+    try:
+        target_id = int(context.args[0])
+        vip_level = int(context.args[1])
+        if vip_level not in (0, 1, 2, 3):
+            raise ValueError
+    except Exception:
+        await update.message.reply_text('参数错误。')
+        return
+    
+    # 获取用户当前VIP信息
+    with SessionLocal() as session:
+        user = session.query(User).filter_by(user_id=target_id).first()
+        if not user:
+            await update.message.reply_text('用户不存在。')
+            return
+        
+        # 如果用户当前是VIP且未过期，检查剩余天数
+        if user.vip_level > 0 and user.vip_expiry_date:
+            expiry_date = datetime.strptime(user.vip_expiry_date, '%Y-%m-%d')
+            remaining_days = (expiry_date - datetime.now()).days
+            if remaining_days >= 30:
+                # 如果剩余天数大于等于30天，只更新等级
+                user.vip_level = vip_level
+                session.commit()
+                await update.message.reply_text(f'用户 {target_id} VIP等级已更新为 {vip_level}，过期时间保持不变')
+                return
+    
+    # 如果用户不是VIP或剩余天数小于30天，使用默认的set_user_vip_level函数
+    set_user_vip_level(target_id, vip_level)
+    await update.message.reply_text(f'用户 {target_id} VIP等级已设置为 {vip_level}')
+
+def set_user_vip_level(user_id, vip_level, days=30):
+    with SessionLocal() as session:
+        user = session.query(User).filter_by(user_id=user_id).first()
+        if user:
+            now = datetime.now()
+            if vip_level > 0:
+                # 如果是首次成为VIP，设置vip_date
+                if not user.vip_date:
+                    user.vip_date = now.strftime('%Y-%m-%d')
+                user.vip_level = vip_level
+                # 只有在没有过期时间或过期时间小于30天时才设置新的过期时间
+                if not user.vip_expiry_date:
+                    user.vip_expiry_date = (now + timedelta(days=days)).strftime('%Y-%m-%d')
+                else:
+                    expiry_date = datetime.strptime(user.vip_expiry_date, '%Y-%m-%d')
+                    if (expiry_date - now).days < 30:
+                        user.vip_expiry_date = (now + timedelta(days=days)).strftime('%Y-%m-%d')
+            else:
+                user.vip_level = 0
+                user.vip_expiry_date = None
+                # 不清除vip_date，保留首次成为VIP的记录
+            session.commit()

@@ -55,76 +55,169 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("文件已上传，等待管理员审核。")
 
 async def handle_document_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """处理文档审核回调"""
+    """处理管理员对文档的操作"""
     query = update.callback_query
-    await query.answer()
-    
     user_id = update.effective_user.id
-    if user_id not in ADMIN_IDS:
-        await query.message.reply_text("此操作仅限管理员使用！")
-        return
     
+    # 验证是否是管理员
+    if user_id not in context.bot_data.get('admin_ids', []):
+        await query.answer("只有管理员可以执行此操作")
+        return
+
     # 解析回调数据
-    action, doc_id = query.data.split('_')[1:]
-    doc_id = int(doc_id)
-    
-    # 更新文档状态
-    session = SessionLocal()
-    doc = session.query(UploadedDocument).filter_by(id=doc_id).first()
-    if not doc:
-        await query.message.reply_text("文档不存在！")
+    parts = query.data.split('_')
+    if len(parts) < 3:
+        await query.answer("无效的操作")
         return
-    
-    if action == 'approve':
-        doc.status = 'approved'
-        await query.message.reply_text(f"已批准文件：{doc.file_name}")
-        # 通知用户
-        try:
-            await context.bot.send_message(
-                chat_id=doc.user_id,
-                text=f"您的文件 {doc.file_name} 已通过审核！"
+        
+    action = f"{parts[1]}_{parts[2]}" if len(parts) > 3 else parts[1]
+    doc_id = int(parts[-1])
+
+    with SessionLocal() as session:
+        doc = session.query(UploadedDocument).filter_by(id=doc_id).first()
+        if not doc:
+            await query.answer("文档不存在")
+            return
+
+        if action == "approve":
+            doc.status = 'approved'
+            doc.approved_by = user_id
+            # 给用户增加5积分
+            new_points = add_points(doc.user_id, 5)
+            await query.edit_message_caption(
+                caption=query.message.caption + "\n\n✅ 已收录"
             )
-        except Exception as e:
-            print(f"通知用户 {doc.user_id} 失败：{str(e)}")
-    else:
-        doc.status = 'rejected'
-        await query.message.reply_text(f"已拒绝文件：{doc.file_name}")
-        # 通知用户
-        try:
-            await context.bot.send_message(
-                chat_id=doc.user_id,
-                text=f"您的文件 {doc.file_name} 未通过审核。"
+            # 通知用户
+            try:
+                await context.bot.send_message(
+                    chat_id=doc.user_id,
+                    text=f"您的文档《{doc.file_name}》已被管理员收录。\n获得5积分奖励！当前积分：{new_points}"
+                )
+            except Exception as e:
+                print(f"通知用户失败: {e}")
+            
+        elif action == "approve_download":
+            # 检查文件是否已经被下载
+            if doc.is_downloaded and doc.download_path and os.path.exists(doc.download_path):
+                await query.answer("文件已经被其他管理员下载过了")
+                return
+                
+            doc.status = 'approved'
+            doc.approved_by = user_id
+            doc.is_downloaded = True
+            
+            try:
+                # 获取文件信息
+                print(f"Getting file info for file_id: {doc.tg_file_id}")  # 调试信息
+                file_info = await context.bot.get_file(doc.tg_file_id)
+                print(f"File info: {file_info}")  # 调试信息
+                
+                if not file_info:
+                    raise Exception("无法获取文件信息")
+
+                # 下载文件
+                download_path = os.path.join(DOWNLOAD_DIR, doc.file_name).replace('\\', '/')
+                
+                # 使用download_to_drive下载文件
+                print(f"Downloading to: {download_path}")  # 调试信息
+                await file_info.download_to_drive(
+                    custom_path=download_path,
+                    read_timeout=30,
+                    write_timeout=30,
+                    connect_timeout=30,
+                    pool_timeout=30
+                )
+                
+                doc.download_path = download_path
+                # 给用户增加5积分
+                new_points = add_points(doc.user_id, 5)
+                await query.edit_message_caption(
+                    caption=query.message.caption + "\n\n✅ 已收录并下载"
+                )
+                # 通知用户
+                try:
+                    await context.bot.send_message(
+                        chat_id=doc.user_id,
+                        text=f"您的文档《{doc.file_name}》已被管理员收录。\n获得5积分奖励！当前积分：{new_points}"
+                    )
+                except Exception as e:
+                    print(f"通知用户失败: {e}")
+                    
+            except Exception as e:
+                print(f"下载文件失败: {str(e)}")
+                await query.edit_message_caption(
+                    caption=query.message.caption + "\n\n⚠️ 已收录但下载失败，请重试"
+                )
+                await query.answer("文件下载失败，但已标记为收录")
+                # 通知用户下载失败
+                try:
+                    await context.bot.send_message(
+                        chat_id=doc.user_id,
+                        text=f"您的文档《{doc.file_name}》已被收录，但下载存档失败，管理员将重试。"
+                    )
+                except Exception as e:
+                    print(f"通知用户失败: {e}")
+            
+        elif action == "reject":
+            doc.status = 'rejected'
+            await query.edit_message_caption(
+                caption=query.message.caption + "\n\n❌ 已拒绝"
             )
+            # 通知用户
+            try:
+                await context.bot.send_message(
+                    chat_id=doc.user_id,
+                    text=f"您的文档《{doc.file_name}》已被管理员拒绝。"
+                )
+            except Exception as e:
+                print(f"通知用户失败: {e}")
+        
+        try:
+            session.commit()
+            await query.answer("操作已完成")
         except Exception as e:
-            print(f"通知用户 {doc.user_id} 失败：{str(e)}")
-    
-    session.commit()
+            print(f"数据库更新失败: {str(e)}")
+            session.rollback()
+            await query.answer("操作失败，请重试")
+
 
 async def batch_approve_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """处理批量批准命令"""
+    """批量批准所有待审核的文档"""
     user_id = update.effective_user.id
-    if user_id not in ADMIN_IDS:
-        await update.message.reply_text("此命令仅限管理员使用！")
+    if user_id not in context.bot_data.get('admin_ids', []):
+        await update.message.reply_text('只有管理员可以使用此命令。')
         return
-    
-    # 获取所有待审核文件
-    session = SessionLocal()
-    pending_docs = session.query(UploadedDocument).filter_by(status='pending').all()
-    
-    if not pending_docs:
-        await update.message.reply_text("没有待审核的文件！")
-        return
-    
-    # 批量批准
-    for doc in pending_docs:
-        doc.status = 'approved'
+
+    with SessionLocal() as session:
+        # 获取所有待审核的文档
+        pending_docs = session.query(UploadedDocument).filter(
+            UploadedDocument.status == 'pending'
+        ).all()
+        
+        if not pending_docs:
+            await update.message.reply_text('没有待审核的文档。')
+            return
+        
+        approved_count = 0
+        for doc in pending_docs:
+            doc.status = 'approved'
+            doc.approved_by = user_id
+            # 给用户增加5积分
+            new_points = add_points(doc.user_id, 5)
+            approved_count += 1
+            
+            # 通知用户
+            try:
+                await context.bot.send_message(
+                    chat_id=doc.user_id,
+                    text=f"您的文档《{doc.file_name}》已被管理员收录。\n获得5积分奖励！当前积分：{new_points}"
+                )
+            except Exception as e:
+                print(f"通知用户失败: {e}")
+        
         try:
-            await context.bot.send_message(
-                chat_id=doc.user_id,
-                text=f"您的文件 {doc.file_name} 已通过审核！"
-            )
+            session.commit()
+            await update.message.reply_text(f'成功批准了 {approved_count} 个文档。')
         except Exception as e:
-            print(f"通知用户 {doc.user_id} 失败：{str(e)}")
-    
-    session.commit()
-    await update.message.reply_text(f"已批量批准 {len(pending_docs)} 个文件！") 
+            session.rollback()
+            await update.message.reply_text(f'操作失败：{str(e)}') 
