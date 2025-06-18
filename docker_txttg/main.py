@@ -230,10 +230,9 @@ def get_unsent_files(user_id):
         file_ids = {row.file_id for row in session.query(File.file_id).all()}
         uploaded_ids = {doc.id for doc in session.query(UploadedDocument).filter_by(status='approved').all()}
         
-        # 获取已发送的文件ID
-        sent_records = session.query(SentFile).filter_by(user_id=user_id).all()
-        sent_file_ids = {record.file_id for record in sent_records if record.source == 'file'}
-        sent_uploaded_ids = {record.file_id for record in sent_records if record.source == 'uploaded'}
+        # 获取已发送的文件ID，直接按source分类查询
+        sent_file_ids = {record.file_id for record in session.query(SentFile).filter_by(user_id=user_id, source='file').all()}
+        sent_uploaded_ids = {record.file_id for record in session.query(SentFile).filter_by(user_id=user_id, source='uploaded').all()}
         
         # 获取未发送的文件ID
         unsent_file_ids = list(file_ids - sent_file_ids)
