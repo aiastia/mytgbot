@@ -2,12 +2,10 @@ from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from utils.db import SessionLocal, User
-from config import VIP_PACKAGES, VIP_DAYS
+from config import VIP_PACKAGES, VIP_DAYS , ADMIN_IDS
 from utils.calculations import (
     calculate_points_for_days,
-    get_package_points,
-    get_user_points,
-    add_points
+    get_user_points
 )
 
 def is_vip_active(user_id: int) -> bool:

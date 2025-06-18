@@ -68,3 +68,6 @@ ALLOWED_EXTENSIONS = {'.txt', '.epub', '.pdf', '.mobi'}
 
 # 下载目录
 DOWNLOAD_DIR = os.path.join(os.getenv('TXT_ROOT', '/app/share_folder'), 'downloaded_docs').replace('\\', '/')
+
+API_BASE_URL = os.getenv('IDATARIVER_API_URL', 'https://open.idatariver.com/mapi')
+API_KEY = os.getenv('IDATARIVER_API_KEY')

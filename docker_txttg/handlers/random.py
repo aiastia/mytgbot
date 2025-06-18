@@ -4,8 +4,8 @@ from config import ADMIN_IDS
 import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from orm_utils import SessionLocal
-from orm_models import File, UploadedDocument
+from utils.db import SessionLocal
+from utils.db import File, UploadedDocument
 from utils.calculations import get_today_sent_count
 
 async def send_random_txt(update: Update, context: ContextTypes.DEFAULT_TYPE):

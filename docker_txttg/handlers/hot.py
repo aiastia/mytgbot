@@ -1,110 +1,70 @@
+import  os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes
-from utils.db import SessionLocal, File, SentFile
+from telegram.ext import ContextTypes 
+from utils.db import SessionLocal, File, SentFile,FileFeedback
 from datetime import datetime, timedelta
 from services.user_service import ensure_user, get_sent_file_ids, get_user_vip_level
 from services.file_service import mark_file_sent
 from config import ADMIN_IDS
+HOT_PAGE_SIZE = 10
 
 async def hot(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """处理热门文件命令"""
-    user_id = update.effective_user.id
-    ensure_user(user_id)
-    
-    # 检查用户VIP等级
-    vip_level = get_user_vip_level(user_id)
-    if vip_level < 1 and user_id not in ADMIN_IDS:
-        await update.message.reply_text("您需要VIP1才能使用此功能！")
+    await send_hot_page(update, context, page=0, edit=False)
+
+async def send_hot_page(update, context, page=0, edit=False):
+    with SessionLocal() as session:
+        from sqlalchemy import func
+        seven_days_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+        likes_subq = session.query(
+            FileFeedback.file_id,
+            func.count().label('likes')
+        ).filter(
+            FileFeedback.feedback == 1,
+            FileFeedback.date >= seven_days_ago
+        ).group_by(FileFeedback.file_id).subquery()
+        rows = (
+            session.query(
+                File.file_path,
+                File.tg_file_id,
+                func.coalesce(likes_subq.c.likes, 0)
+            )
+            .outerjoin(likes_subq, File.file_id == likes_subq.c.file_id)
+            .filter(likes_subq.c.likes != None)
+            .order_by(likes_subq.c.likes.desc(), File.file_path)
+            .all()
+        )
+    total = len(rows)
+    if total == 0:
+        msg = '最近7天还没有文件收到，快去评分吧！'
+        if edit and update.callback_query:
+            await update.callback_query.edit_message_text(msg)
+        else:
+            await update.message.reply_text(msg)
         return
-    
-    # 检查用户今日发送数量
-    count = get_sent_file_ids(user_id)
-    if count >= 5:
-        await update.message.reply_text("您今日已发送5个文件，请明天再来！")
-        return
-    
-    # 获取热门文件
-    session = SessionLocal()
-    today = datetime.now().date()
-    week_ago = today - timedelta(days=7)
-    
-    # 统计最近7天的文件发送次数
-    hot_files = session.query(
-        File,
-        SentFile.file_id,
-        SentFile.sent_at
-    ).join(
-        SentFile,
-        File.file_id == SentFile.file_id
-    ).filter(
-        SentFile.sent_at >= week_ago
-    ).all()
-    
-    if not hot_files:
-        await update.message.reply_text("暂无热门文件！")
-        return
-    
-    # 构建热门文件列表
-    message = "🔥 热门文件（最近7天）：\n\n"
-    keyboard = []
-    
-    for file, _, _ in hot_files[:10]:  # 只显示前10个
-        message += f"📄 {file.file_name}\n"
-        keyboard.append([InlineKeyboardButton(
-            f"📄 {file.file_name}",
-            callback_data=f"hotpage|{file.file_id}"
-        )])
-    
-    await update.message.reply_text(
-        message,
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    start = page * HOT_PAGE_SIZE
+    end = start + HOT_PAGE_SIZE
+    page_rows = rows[start:end]
+    msg = '🔥 <b>热榜（近7天👍最多的文件）</b> 🔥\n\n'
+    for idx, (file_path, tg_file_id, likes) in enumerate(page_rows, start+1):
+        filename = os.path.basename(file_path)
+        msg += f'<b>{idx}. {filename}</b>\n📄 <code>{tg_file_id}</code>\n👍 <b>{likes}</b>\n\n'
+    # 分页按钮
+    buttons = []
+    if page > 0:
+        buttons.append(InlineKeyboardButton('上一页', callback_data=f'hotpage|{page-1}'))
+    if end < total:
+        buttons.append(InlineKeyboardButton('下一页', callback_data=f'hotpage|{page+1}'))
+    reply_markup = InlineKeyboardMarkup([buttons]) if buttons else None
+    if edit and update.callback_query:
+        await update.callback_query.edit_message_text(msg, parse_mode='HTML', reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(msg, parse_mode='HTML', reply_markup=reply_markup)
+
 
 async def hot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """处理热门文件回调"""
     query = update.callback_query
     await query.answer()
-    
-    user_id = update.effective_user.id
-    ensure_user(user_id)
-    
-    # 检查用户VIP等级
-    vip_level = get_user_vip_level(user_id)
-    if vip_level < 1 and user_id not in ADMIN_IDS:
-        await query.message.reply_text("您需要VIP1才能使用此功能！")
-        return
-    
-    # 检查用户今日发送数量
-    count = get_sent_file_ids(user_id)
-    if count >= 5:
-        await query.message.reply_text("您今日已发送5个文件，请明天再来！")
-        return
-    
-    # 获取文件信息
-    file_id = int(query.data.split('|')[1])
-    
-    file = SessionLocal().query(File).filter_by(file_id=file_id).first()
-    if not file:
-        await query.message.reply_text("文件不存在！")
-        return
-    
-    if file.tg_file_id:
-        await query.message.reply_document(
-            document=file.tg_file_id,
-            caption=f"file id: `{file.tg_file_id}`",
-            parse_mode='Markdown'
-        )
-    else:
-        with open(file.file_path, 'rb') as f:
-            message = await query.message.reply_document(
-                document=f,
-                caption="正在生成文件ID..."
-            )
-            # 获取文件ID并更新数据库
-            file_id = message.document.file_id
-            mark_file_sent(user_id, file.file_id, 'file')
-            # 更新消息
-            await message.edit_caption(
-                caption=f"file id: `{file_id}`",
-                parse_mode='Markdown'
-            ) 
+    data = query.data.split('|')
+    if len(data) == 2 and data[0] == 'hotpage':
+        page = int(data[1])
+        await send_hot_page(update, context, page=page, edit=True)
