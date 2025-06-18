@@ -196,49 +196,40 @@ def record_feedback(user_id, file_id, feedback):
 
 def get_unsent_files(user_id):
     with SessionLocal() as session:
-        # 获取所有文件路径
-        all_files = [row.file_path for row in session.query(File.file_path).all()]
+        # 获取所有文件ID
+        file_ids = {row.file_id for row in session.query(File.file_id).all()}
+        uploaded_ids = {doc.id for doc in session.query(UploadedDocument).filter_by(status='approved').all()}
         
-        # 获取已收录的上传文档
-        uploaded_docs = session.query(UploadedDocument).filter_by(
-            status='approved'
-        ).all()
-        for doc in uploaded_docs:
-            if doc.tg_file_id:  # 只要有 tg_file_id 就可以
-                all_files.append(doc.tg_file_id)
-        
-        # 获取已发送的文件记录
+        # 获取已发送的文件ID
         sent_records = session.query(SentFile).filter_by(user_id=user_id).all()
+        sent_file_ids = {record.file_id for record in sent_records if record.source == 'file'}
+        sent_uploaded_ids = {record.file_id for record in sent_records if record.source == 'uploaded'}
         
-        # 分别处理 File 表和 UploadedDocument 表的已发送记录
-        sent_file_ids = set()  # 存储 File 表的已发送记录
-        sent_uploaded_ids = set()  # 存储 UploadedDocument 表的已发送记录
+        # 获取未发送的文件ID
+        unsent_file_ids = file_ids - sent_file_ids
+        unsent_uploaded_ids = uploaded_ids - sent_uploaded_ids
         
-        for record in sent_records:
-            if record.source == 'file':
-                sent_file_ids.add(record.file_id)
-            elif record.source == 'uploaded':
-                sent_uploaded_ids.add(record.file_id)
-        
-        # 获取文件映射
-        file_map = {row.file_path: row.file_id for row in session.query(File.file_id, File.file_path).all()}
-        uploaded_map = {doc.tg_file_id: doc.id for doc in uploaded_docs if doc.tg_file_id}
-        
-        # 找出未发送的文件
+        # 获取未发送文件的完整信息
         unsent = []
-        for file_path in all_files:
-            # 检查是否是上传文档的 tg_file_id
-            if file_path in uploaded_map:
-                if uploaded_map[file_path] not in sent_uploaded_ids:
-                    unsent.append(file_path)
-            # 检查是否是普通文件
-            elif file_path in file_map:
-                if file_map[file_path] not in sent_file_ids:
-                    unsent.append(file_path)
-            else:
-                # 如果既不在 uploaded_map 也不在 file_map 中，说明是新文件
-                unsent.append(file_path)
-                
+        
+        # 获取未发送的File表文件信息
+        if unsent_file_ids:
+            files = session.query(File).filter(File.file_id.in_(unsent_file_ids)).all()
+            for file in files:
+                if file.tg_file_id:
+                    unsent.append(file.tg_file_id)
+                elif file.file_path and os.path.exists(file.file_path):
+                    unsent.append(file.file_path)
+        
+        # 获取未发送的UploadedDocument表文件信息
+        if unsent_uploaded_ids:
+            uploaded_docs = session.query(UploadedDocument).filter(UploadedDocument.id.in_(unsent_uploaded_ids)).all()
+            for doc in uploaded_docs:
+                if doc.tg_file_id:
+                    unsent.append(doc.tg_file_id)
+                elif doc.download_path and os.path.exists(doc.download_path):
+                    unsent.append(doc.download_path)
+        
         return unsent
 
 async def send_file_job(context: ContextTypes.DEFAULT_TYPE):
