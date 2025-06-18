@@ -1,6 +1,7 @@
 from datetime import datetime
 from config import VIP_DAYS, VIP_PACKAGES
-from utils.db import SessionLocal, User
+from utils.db import SessionLocal, User ,SentFile
+
 
 def get_user_points(user_id: int) -> int:
     """获取用户积分"""
@@ -58,3 +59,13 @@ def get_package_points(level: int, days: int) -> int:
         if pkg_level == level and pkg_days == days:
             return points
     return 0  # 无效的套餐组合 
+
+def get_today_sent_count(user_id):
+    """获取用户今日已发送文件数量，使用 count 优化查询"""
+    with SessionLocal() as session:
+        today = datetime.now().strftime('%Y-%m-%d')
+        count = session.query(SentFile).filter_by(
+            user_id=user_id, 
+            date=today
+        ).count()
+    return count
