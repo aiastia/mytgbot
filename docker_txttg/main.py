@@ -154,9 +154,9 @@ def get_user_vip_level(user_id):
             return user.vip_level, 10
 
 def get_sent_file_ids(user_id):
+    """获取用户已发送的文件数量"""
     with SessionLocal() as session:
-        ids = [row.file_id for row in session.query(SentFile.file_id).filter_by(user_id=user_id).all()]
-    return ids
+        return session.query(SentFile).filter_by(user_id=user_id).count()
 
 def mark_file_sent(user_id, file_id, source='file'):
     """记录文件发送历史，使用 merge 避免重复记录"""
@@ -439,7 +439,7 @@ async def send_random_txt(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     ensure_user(user_id)
-    count = len(get_sent_file_ids(user_id))
+    count = get_sent_file_ids(user_id)
     await update.message.reply_text(f'你已收到 {count} 个文件。')
 
 HOT_PAGE_SIZE = 10
@@ -783,7 +783,7 @@ async def user_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         today_count = get_today_sent_count(user_id)
         
         # 获取总接收文件数
-        total_files = len(get_sent_file_ids(user_id))
+        total_files = get_sent_file_ids(user_id)
         
         # 构建消息
         msg = f'📊 <b>用户统计信息</b>\n\n'
