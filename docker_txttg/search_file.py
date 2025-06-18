@@ -3,7 +3,7 @@ import math
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 from orm_utils import SessionLocal
-from orm_models import User, File
+from orm_models import User, File, UploadedDocument
 
 # 工具函数：分割长消息
 MAX_TG_MSG_LEN = 4096
@@ -31,14 +31,36 @@ def get_file_by_id(file_id):
             return file.tg_file_id, file.file_path
         return None
 
+def get_uploaded_file_by_id(file_id):
+    with SessionLocal() as session:
+        file = session.query(UploadedDocument).filter_by(id=file_id).first()
+        if file:
+            return file.tg_file_id, file.download_path
+        return None
+
 def search_files_by_name(keyword):
     with SessionLocal() as session:
         results = session.query(File).filter(File.file_path.like(f"%{keyword}%")).order_by(File.file_id.desc()).all()
         return [(file.file_id, file.file_path, file.tg_file_id) for file in results]
 
+def search_uploaded_files_by_name(keyword):
+    with SessionLocal() as session:
+        results = session.query(UploadedDocument).filter(
+            UploadedDocument.file_name.like(f"%{keyword}%"),
+            UploadedDocument.status == 'approved'
+        ).order_by(UploadedDocument.id.desc()).all()
+        return [(file.id, file.file_name, file.tg_file_id) for file in results]
+
 def update_file_tg_id(file_id, tg_file_id):
     with SessionLocal() as session:
         file = session.query(File).filter_by(file_id=file_id).first()
+        if file:
+            file.tg_file_id = tg_file_id
+            session.commit()
+
+def update_uploaded_file_tg_id(file_id, tg_file_id):
+    with SessionLocal() as session:
+        file = session.query(UploadedDocument).filter_by(id=file_id).first()
         if file:
             file.tg_file_id = tg_file_id
             session.commit()
@@ -63,6 +85,25 @@ def build_search_keyboard(results, page, keyword):
         keyboard.append(nav)
     return InlineKeyboardMarkup(keyboard)
 
+def build_uploaded_search_keyboard(results, page, keyword):
+    start = page * PAGE_SIZE
+    end = start + PAGE_SIZE
+    page_results = results[start:end]
+    keyboard = []
+    for file_id, file_name, tg_file_id in page_results:
+        # 按钮 callback_data: sget|file_id
+        keyboard.append([InlineKeyboardButton(file_name, callback_data=f"sget|{file_id}")])
+    # 分页按钮
+    total_pages = math.ceil(len(results) / PAGE_SIZE)
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton('上一页', callback_data=f'spage|{keyword}|{page-1}'))
+    if page < total_pages - 1:
+        nav.append(InlineKeyboardButton('下一页', callback_data=f'spage|{keyword}|{page+1}'))
+    if nav:
+        keyboard.append(nav)
+    return InlineKeyboardMarkup(keyboard)
+
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     vip_level = get_user_vip_level(user_id)
@@ -73,11 +114,11 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text('用法：/s <关键词>')
         return
     keyword = ' '.join(context.args)
-    results = search_files_by_name(keyword)
+    results = search_uploaded_files_by_name(keyword)
     if not results:
         await update.message.reply_text('未找到相关文件。')
         return
-    reply_markup = build_search_keyboard(results, 0, keyword)
+    reply_markup = build_uploaded_search_keyboard(results, 0, keyword)
     await update.message.reply_text(f'搜索结果，共{len(results)}个文件：', reply_markup=reply_markup)
 
 async def search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -86,12 +127,12 @@ async def search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data[0] == 'spage':
         keyword = data[1]
         page = int(data[2])
-        results = search_files_by_name(keyword)
-        reply_markup = build_search_keyboard(results, page, keyword)
+        results = search_uploaded_files_by_name(keyword)
+        reply_markup = build_uploaded_search_keyboard(results, page, keyword)
         await query.edit_message_reply_markup(reply_markup=reply_markup)
     elif data[0] == 'sget':
         file_id = int(data[1])
-        row = get_file_by_id(file_id)
+        row = get_uploaded_file_by_id(file_id)
         if not row:
             await query.answer('文件不存在', show_alert=True)
             return
@@ -125,7 +166,7 @@ async def search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     return
                 # 更新数据库
                 if new_file_id:
-                    update_file_tg_id(file_id, new_file_id)
+                    update_uploaded_file_tg_id(file_id, new_file_id)
             elif os.path.exists(file_path):
                 ext = os.path.splitext(file_path)[1].lower()
                 if ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']:
@@ -143,7 +184,7 @@ async def search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         new_file_id = msg.document.file_id
                 # 更新数据库
                 if new_file_id and new_file_id != tg_file_id:
-                    update_file_tg_id(file_id, new_file_id)
+                    update_uploaded_file_tg_id(file_id, new_file_id)
             else:
                 await query.answer('文件丢失', show_alert=True)
                 return
