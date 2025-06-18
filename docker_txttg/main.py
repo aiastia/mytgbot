@@ -756,26 +756,6 @@ VIP1 - 每日限制30个文件
 VIP2 - 每日限制50个文件
 VIP3 - 每日限制100个文件
 
-<b>积分兑换：</b>
-• 短期VIP：
-  - 10积分 = 3天VIP1
-  - 20积分 = 7天VIP1
-
-• 月度VIP：
-  - 120积分 = 30天VIP1
-  - 240积分 = 30天VIP2
-  - 400积分 = 30天VIP3
-
-• 季度VIP：
-  - 300积分 = 90天VIP1
-  - 600积分 = 90天VIP2
-  - 1000积分 = 90天VIP3
-
-• 年度VIP：
-  - 1000积分 = 365天VIP1
-  - 2000积分 = 365天VIP2
-  - 3500积分 = 365天VIP3
-
 <b>管理员命令：</b>
 /reload - 重新加载文件列表
 /setvip - 设置用户VIP状态
@@ -821,6 +801,7 @@ def main():
     application.add_handler(CommandHandler("help", help_command))  # 添加帮助命令
     application.add_handler(CommandHandler("search", search_command))
     application.add_handler(CommandHandler("ss", ss_command))
+    application.add_handler(CommandHandler('s', search_command))
     application.add_handler(CommandHandler("getfile", getfile))
     application.add_handler(CommandHandler("reload", reload_command))
     application.add_handler(CommandHandler("setvip", setvip_command))
@@ -828,7 +809,7 @@ def main():
     application.add_handler(CommandHandler('random', send_random_txt))
     application.add_handler(CommandHandler('stats', stats))
     application.add_handler(CommandHandler('hot', hot))
-    application.add_handler(CommandHandler('s', search_command))
+
     application.add_handler(CommandHandler('user', user_stats))  # 添加用户统计命令
     application.add_handler(CommandHandler('checkin', checkin_command))  # 添加签到命令
     application.add_handler(CommandHandler('points', points_command))    # 添加积分命令
