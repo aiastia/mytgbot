@@ -61,44 +61,44 @@ def main():
         application = builder.build()
         
         # 添加处理器
-        application.add_handler(CommandHandler("start", on_start))
+    application.add_handler(CommandHandler("start", on_start))
         application.add_handler(CommandHandler("help", help_command))
-        application.add_handler(CommandHandler("search", search_command))
-        application.add_handler(CommandHandler("ss", ss_command))
-        application.add_handler(CommandHandler('s', search_command))
-        application.add_handler(CommandHandler("getfile", getfile))
-        application.add_handler(CommandHandler("reload", reload_command))
-        application.add_handler(CommandHandler("setvip", setvip_command))
-        application.add_handler(CommandHandler("setviplevel", setviplevel_command))
-        application.add_handler(CommandHandler('random', send_random_txt))
-        application.add_handler(CommandHandler('stats', stats))
-        application.add_handler(CommandHandler('hot', hot))
+    application.add_handler(CommandHandler("search", search_command))
+    application.add_handler(CommandHandler("ss", ss_command))
+    application.add_handler(CommandHandler('s', search_command))
+    application.add_handler(CommandHandler("getfile", getfile))
+    application.add_handler(CommandHandler("reload", reload_command))
+    application.add_handler(CommandHandler("setvip", setvip_command))
+    application.add_handler(CommandHandler("setviplevel", setviplevel_command))
+    application.add_handler(CommandHandler('random', send_random_txt))
+    application.add_handler(CommandHandler('stats', stats))
+    application.add_handler(CommandHandler('hot', hot))
         application.add_handler(CommandHandler('checkin', checkin_command))
         application.add_handler(CommandHandler('points', points_command))
         application.add_handler(CommandHandler('redeem', redeem_command))
         application.add_handler(CommandHandler('batchapprove', batch_approve_command))
-
-        # 注册回调处理器
+    
+    # 注册回调处理器
         application.add_handler(CallbackQueryHandler(search_callback, pattern=r'^(spage\||upload_)'))
-        application.add_handler(CallbackQueryHandler(ss_callback, pattern=r'^sspage\|'))
-        application.add_handler(CallbackQueryHandler(feedback_callback, pattern=r'^feedback\|'))
-        application.add_handler(CallbackQueryHandler(hot_callback, pattern=r'^hotpage\|'))
-        application.add_handler(CallbackQueryHandler(handle_document_callback, pattern="^doc_"))
+    application.add_handler(CallbackQueryHandler(ss_callback, pattern=r'^sspage\|'))
+    application.add_handler(CallbackQueryHandler(feedback_callback, pattern=r'^feedback\|'))
+    application.add_handler(CallbackQueryHandler(hot_callback, pattern=r'^hotpage\|'))
+    application.add_handler(CallbackQueryHandler(handle_document_callback, pattern="^doc_"))
         application.add_handler(CallbackQueryHandler(exchange_callback, pattern="^exchange\|"))
-        application.add_handler(CallbackQueryHandler(cancel_callback, pattern="^cancel$"))
-        
-        # 注册文档处理器
-        application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
-        
-        # 设置机器人用户名
-        async def set_username(app):
+    application.add_handler(CallbackQueryHandler(cancel_callback, pattern="^cancel$"))
+    
+    # 注册文档处理器
+    application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+    
+    # 设置机器人用户名
+    async def set_username(app):
             try:
-                me = await app.bot.get_me()
-                set_bot_username(me.username)
+        me = await app.bot.get_me()
+        set_bot_username(me.username)
                 logger.info(f"Bot username set to: {me.username}")
             except Exception as e:
                 logger.error(f"Failed to set bot username: {e}")
-        application.post_init = set_username
+    application.post_init = set_username
         
         # 添加错误处理器
         async def error_handler(update, context):
@@ -111,8 +111,8 @@ def main():
                 logger.error(f"Unexpected error: {context.error}")
         
         application.add_error_handler(error_handler)
-        
-        # 启动机器人
+    
+    # 启动机器人
         logger.info("Starting bot...")
         application.run_polling(allowed_updates=Update.ALL_TYPES)
         

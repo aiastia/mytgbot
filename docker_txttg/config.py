@@ -63,3 +63,8 @@ VIP_PACKAGES = [
     (2, 365, 2000, "365天VIP2"),
     (3, 365, 3500, "365天VIP3"),
 ] 
+
+ALLOWED_EXTENSIONS = {'.txt', '.epub', '.pdf', '.mobi'}
+
+# 下载目录
+DOWNLOAD_DIR = os.path.join(os.getenv('TXT_ROOT', '/app/share_folder'), 'downloaded_docs').replace('\\', '/')
