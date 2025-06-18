@@ -267,19 +267,22 @@ async def send_file_job(context: ContextTypes.DEFAULT_TYPE):
                     msg = await context.bot.send_document(
                         chat_id=chat_id,
                         document=file_id_or_path,
-                        caption=f"文件tg_file_id: {file_id_or_path}"
+                        caption=f"file id: `{file_id_or_path}`",
+                        parse_mode='Markdown'
                     )
                 elif file_id_or_path.startswith('BAAC'):
                     msg = await context.bot.send_video(
                         chat_id=chat_id,
                         video=file_id_or_path,
-                        caption=f"文件tg_file_id: {file_id_or_path}"
+                        caption=f"file id: `{file_id_or_path}`",
+                        parse_mode='Markdown'
                     )
                 elif file_id_or_path.startswith('AgAC'):
                     msg = await context.bot.send_photo(
                         chat_id=chat_id,
                         photo=file_id_or_path,
-                        caption=f"文件tg_file_id: {file_id_or_path}"
+                        caption=f"file id: `{file_id_or_path}`",
+                        parse_mode='Markdown'
                     )
                 
                 # 记录发送
@@ -340,7 +343,7 @@ async def send_file_job(context: ContextTypes.DEFAULT_TYPE):
                 # 更新消息
                 try:
                     if ext == '.mp4' or ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']:
-                        await msg.edit_caption(caption=f"文件tg_file_id: {tg_file_id}")
+                        await msg.edit_caption(caption=f"file id: `{tg_file_id}`", parse_mode='Markdown')
                     else:
                         keyboard = [
                             [
@@ -350,7 +353,8 @@ async def send_file_job(context: ContextTypes.DEFAULT_TYPE):
                         ]
                         reply_markup = InlineKeyboardMarkup(keyboard)
                         await msg.edit_caption(
-                            caption=f"文件tg_file_id: {tg_file_id}",
+                            caption=f"file id: `{tg_file_id}`",
+                            parse_mode='Markdown',
                             reply_markup=reply_markup
                         )
                 except Exception:
@@ -482,11 +486,11 @@ async def getfile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 直接使用 tg_file_id 发送文件，不需要查询数据库
     try:
         if tg_file_id.startswith('BQAC') or tg_file_id.startswith('CAAC') or tg_file_id.startswith('HDAA'):
-            await update.message.reply_document(tg_file_id, caption=f'文件tg_file_id: {tg_file_id}')
+            await update.message.reply_document(tg_file_id, caption=f'file id: `{tg_file_id}`')
         elif tg_file_id.startswith('BAAC'):
-            await update.message.reply_video(tg_file_id, caption=f'文件tg_file_id: {tg_file_id}')
+            await update.message.reply_video(tg_file_id, caption=f'file id: `{tg_file_id}`')
         elif tg_file_id.startswith('AgAC'):
-            await update.message.reply_photo(tg_file_id, caption=f'文件tg_file_id: {tg_file_id}')
+            await update.message.reply_photo(tg_file_id, caption=f'file id: `{tg_file_id}`')
         else:
             await update.message.reply_text('无效的文件ID格式。')
     except Exception as e:
@@ -523,7 +527,7 @@ async def feedback_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
         try:
             await query.edit_message_caption(
-                caption=f"文件tg_file_id: {tg_file_id}",
+                caption=f"file id: `{tg_file_id}`",
                 reply_markup=reply_markup
             )
         except Exception as e:
@@ -699,18 +703,25 @@ async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             with SessionLocal() as session:
                 file = session.query(File).filter_by(file_id=file_id).first()
                 if file:
-                    # 先发送文件说明
-                    info_text = """📄 文件说明：
-这是一个通过 Telegram 机器人分享的文件。
-点击下方按钮下载文件。"""
-                    await update.message.reply_text(info_text)
-                    
-                    # 然后发送文件
                     if file.tg_file_id:
-                        await update.message.reply_document(file.tg_file_id)
+                        # 如果有 tg_file_id，直接发送带说明的文件
+                        caption = f"file id: `{file.tg_file_id}`"
+                        await update.message.reply_document(file.tg_file_id, caption=caption, parse_mode='Markdown')
                     elif file.file_path and os.path.exists(file.file_path):
+                        # 如果是本地文件，先发送带临时说明的文件
                         with open(file.file_path, 'rb') as f:
-                            await update.message.reply_document(f)
+                            msg = await update.message.reply_document(
+                                f,
+                                caption="正在生成文件ID..."
+                            )
+                            # 获取新生成的 tg_file_id
+                            if msg.document:
+                                tg_file_id = msg.document.file_id
+                                # 更新数据库中的 tg_file_id
+                                file.tg_file_id = tg_file_id
+                                session.commit()
+                                # 更新消息说明
+                                await msg.edit_caption(caption=f"file id: `{tg_file_id}`", parse_mode='Markdown')
                     else:
                         await update.message.reply_text('文件不存在或已被删除。')
                     mark_file_sent(update.effective_user.id, file_id, source='file')
