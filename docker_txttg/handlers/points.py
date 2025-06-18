@@ -91,15 +91,6 @@ async def points_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(msg, reply_markup=reply_markup)
 
-# 使用vip.py中的回调处理函数
-async def exchange_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    from .vip import exchange_callback as vip_exchange
-    return await vip_exchange(update, context)
-
-async def cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    from .vip import cancel_callback as vip_cancel
-    return await vip_cancel(update, context)
-
 def upgrade_vip_level(user_id: int, target_level: int, target_days: int) -> tuple[bool, str]:
     """升级或续费VIP等级"""
     with SessionLocal() as session:
@@ -112,7 +103,7 @@ def upgrade_vip_level(user_id: int, target_level: int, target_days: int) -> tupl
             return False, "无效的VIP等级"
         
         # 验证目标天数
-        if target_days not in VIP_PACKAGES:
+        if target_days not in VIP_DAYS:
             return False, "无效的套餐天数"
         
         # 不能降级
