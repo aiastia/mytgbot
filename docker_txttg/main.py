@@ -136,10 +136,10 @@ def get_sent_file_ids(user_id):
         ids = [row.file_id for row in session.query(SentFile.file_id).filter_by(user_id=user_id).all()]
     return ids
 
-def mark_file_sent(user_id, file_id):
+def mark_file_sent(user_id, file_id, source='file'):
     with SessionLocal() as session:
         date = datetime.now().strftime('%Y-%m-%d')
-        session.merge(SentFile(user_id=user_id, file_id=file_id, date=date))
+        session.merge(SentFile(user_id=user_id, file_id=file_id, date=date, source=source))
         session.commit()
 
 def get_today_sent_count(user_id):

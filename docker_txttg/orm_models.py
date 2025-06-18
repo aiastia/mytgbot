@@ -24,6 +24,7 @@ class SentFile(Base):
     user_id = Column(Integer, ForeignKey('users.user_id'), primary_key=True)
     file_id = Column(Integer, ForeignKey('files.file_id'), primary_key=True)
     date = Column(String(32))
+    source = Column(String(20), default='file')  # 'file' 表示来自 files 表，'uploaded' 表示来自 uploaded_documents 表
 
 class FileFeedback(Base):
     __tablename__ = 'file_feedback'

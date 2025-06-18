@@ -3,7 +3,8 @@ import math
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 from orm_utils import SessionLocal
-from orm_models import User, File, UploadedDocument
+from orm_models import User, File, UploadedDocument, SentFile
+from datetime import datetime
 
 # 工具函数：分割长消息
 MAX_TG_MSG_LEN = 4096
@@ -188,6 +189,35 @@ async def search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 await query.answer('文件丢失', show_alert=True)
                 return
+
+            # 记录发送，添加 source 标识
+            with SessionLocal() as session:
+                # 首先检查是否已存在该 tg_file_id 的记录
+                file = session.query(File).filter_by(tg_file_id=tg_file_id).first()
+                if not file:
+                    # 如果是上传的文档，使用其信息创建记录
+                    uploaded_doc = session.query(UploadedDocument).filter_by(tg_file_id=tg_file_id).first()
+                    if uploaded_doc:
+                        file = File(
+                            file_path=uploaded_doc.download_path or tg_file_id,
+                            tg_file_id=tg_file_id,
+                            file_size=uploaded_doc.file_size
+                        )
+                        session.add(file)
+                        session.commit()
+                
+                if file:
+                    # 记录发送，并标记来源为 uploaded
+                    date = datetime.now().strftime('%Y-%m-%d')
+                    sent_file = SentFile(
+                        user_id=query.from_user.id,
+                        file_id=file.file_id,
+                        date=date,
+                        source='uploaded'
+                    )
+                    session.merge(sent_file)
+                    session.commit()
+
         except Exception as e:
             await query.answer(f'发送失败: {e}', show_alert=True)
         await query.answer()
