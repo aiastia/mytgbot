@@ -9,7 +9,7 @@ from search_file import ss_callback
 from orm_utils import SessionLocal, init_db
 from orm_models import User, File, SentFile, FileFeedback, UploadedDocument
 from db_migrate import migrate_db  # 导入数据库迁移函数
-from document_handler import handle_document, handle_document_callback
+from document_handler import handle_document, handle_document_callback, batch_approve_command
 from telegram.request import HTTPXRequest
 from points_system import checkin_command, points_command, exchange_callback, cancel_callback  # 添加导入
 from license_handler import redeem_command  # 添加导入
@@ -808,7 +808,7 @@ VIP3 - 每日限制100个文件
 /reload - 重新加载文件列表
 /setvip - 设置用户VIP状态
 /setviplevel - 设置用户VIP等级
-
+/batchapprove - 批量批准上传的文件
 <b>使用提示：</b>
 • 每日签到可获得1-5积分
 • 文件评分可帮助其他用户找到优质内容
@@ -862,6 +862,7 @@ def main():
     application.add_handler(CommandHandler('checkin', checkin_command))  # 添加签到命令
     application.add_handler(CommandHandler('points', points_command))    # 添加积分命令
     application.add_handler(CommandHandler('redeem', redeem_command))    # 添加兑换码命令
+    application.add_handler(CommandHandler('batchapprove', batch_approve_command))  # 添加批量批准命令
     
     # 注册回调处理器
     application.add_handler(CallbackQueryHandler(search_callback, pattern=r'^(spage|sget)\|'))

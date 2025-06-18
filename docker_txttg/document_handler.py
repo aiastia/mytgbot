@@ -95,7 +95,8 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_id=admin_id,
                 document=document.file_id,
                 caption=admin_message,
-                reply_markup=reply_markup
+                reply_markup=reply_markup,
+                disable_notification=True
             )
         except Exception as e:
             print(f"发送给管理员 {admin_id} 失败: {e}")
@@ -226,4 +227,45 @@ async def handle_document_callback(update: Update, context: ContextTypes.DEFAULT
         except Exception as e:
             print(f"数据库更新失败: {str(e)}")
             session.rollback()
-            await query.answer("操作失败，请重试") 
+            await query.answer("操作失败，请重试")
+
+async def batch_approve_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """批量批准所有待审核的文档"""
+    user_id = update.effective_user.id
+    if user_id not in context.bot_data.get('admin_ids', []):
+        await update.message.reply_text('只有管理员可以使用此命令。')
+        return
+
+    with SessionLocal() as session:
+        # 获取所有待审核的文档
+        pending_docs = session.query(UploadedDocument).filter(
+            UploadedDocument.status == 'pending'
+        ).all()
+        
+        if not pending_docs:
+            await update.message.reply_text('没有待审核的文档。')
+            return
+        
+        approved_count = 0
+        for doc in pending_docs:
+            doc.status = 'approved'
+            doc.approved_by = user_id
+            # 给用户增加10积分
+            new_points = add_points(doc.user_id, 10)
+            approved_count += 1
+            
+            # 通知用户
+            try:
+                await context.bot.send_message(
+                    chat_id=doc.user_id,
+                    text=f"您的文档《{doc.file_name}》已被管理员收录。\n获得10积分奖励！当前积分：{new_points}"
+                )
+            except Exception as e:
+                print(f"通知用户失败: {e}")
+        
+        try:
+            session.commit()
+            await update.message.reply_text(f'成功批准了 {approved_count} 个文档。')
+        except Exception as e:
+            session.rollback()
+            await update.message.reply_text(f'操作失败：{str(e)}') 
