@@ -215,6 +215,136 @@ def get_unsent_files(user_id):
             unsent.append(file_path)
     return unsent
 
+async def send_file_job(context: ContextTypes.DEFAULT_TYPE):
+    """异步任务：发送文件"""
+    job_data = context.job.data
+    chat_id = job_data['chat_id']
+    file_id_or_path = job_data['file_id_or_path']
+    user_id = job_data['user_id']
+    prep_message_id = job_data['prep_message_id']
+    
+    try:
+        # 检查是否是 tg_file_id
+        if file_id_or_path.startswith(('BQAC', 'CAAC', 'HDAA', 'BAAC', 'AgAC')):
+            # 直接使用 tg_file_id 发送文件
+            try:
+                if file_id_or_path.startswith('BQAC') or file_id_or_path.startswith('CAAC') or file_id_or_path.startswith('HDAA'):
+                    msg = await context.bot.send_document(
+                        chat_id=chat_id,
+                        document=file_id_or_path,
+                        caption=f"文件tg_file_id: {file_id_or_path}"
+                    )
+                elif file_id_or_path.startswith('BAAC'):
+                    msg = await context.bot.send_video(
+                        chat_id=chat_id,
+                        video=file_id_or_path,
+                        caption=f"文件tg_file_id: {file_id_or_path}"
+                    )
+                elif file_id_or_path.startswith('AgAC'):
+                    msg = await context.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=file_id_or_path,
+                        caption=f"文件tg_file_id: {file_id_or_path}"
+                    )
+                
+                # 记录发送
+                with SessionLocal() as session:
+                    # 首先检查是否已存在该 tg_file_id 的记录
+                    file = session.query(File).filter_by(tg_file_id=file_id_or_path).first()
+                    if not file:
+                        # 如果是上传的文档，使用其信息创建记录
+                        uploaded_doc = session.query(UploadedDocument).filter_by(tg_file_id=file_id_or_path).first()
+                        if uploaded_doc:
+                            file = File(
+                                file_path=uploaded_doc.download_path or file_id_or_path,
+                                tg_file_id=file_id_or_path,
+                                file_size=uploaded_doc.file_size
+                            )
+                            session.add(file)
+                            session.commit()
+                    
+                    if file:
+                        mark_file_sent(user_id, file.file_id)
+            except Exception as e:
+                await context.bot.send_message(chat_id=chat_id, text=f'发送文件失败: {str(e)}')
+                return
+        else:
+            # 处理本地文件
+            file_path = file_id_or_path
+            ext = os.path.splitext(file_path)[1].lower()
+            image_exts = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
+            with open(file_path, 'rb') as f:
+                if ext == '.mp4':
+                    msg = await context.bot.send_video(
+                        chat_id=chat_id,
+                        video=f,
+                        caption="正在生成文件ID..."
+                    )
+                    tg_file_id = msg.video.file_id
+                elif ext in image_exts:
+                    msg = await context.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=f,
+                        caption="正在生成文件ID..."
+                    )
+                    tg_file_id = msg.photo[-1].file_id if msg.photo else None
+                else:
+                    keyboard = [
+                        [
+                            InlineKeyboardButton("👍", callback_data=f"feedback|{{file_id}}|1"),
+                            InlineKeyboardButton("👎", callback_data=f"feedback|{{file_id}}|-1"),
+                        ]
+                    ]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    msg = await context.bot.send_document(
+                        chat_id=chat_id,
+                        document=f,
+                        caption="正在生成文件ID...",
+                        reply_markup=reply_markup
+                    )
+                    tg_file_id = msg.document.file_id
+            
+            # 使用 get_or_create_file 处理本地文件
+            file_id = get_or_create_file(file_path, tg_file_id)
+            mark_file_sent(user_id, file_id)
+            
+            if ext == '.mp4' or ext in image_exts:
+                try:
+                    await msg.edit_caption(
+                        caption=f"文件tg_file_id: {tg_file_id}"
+                    )
+                except Exception:
+                    pass
+            else:
+                keyboard = [
+                    [
+                        InlineKeyboardButton("👍", callback_data=f"feedback|{file_id}|1"),
+                        InlineKeyboardButton("👎", callback_data=f"feedback|{file_id}|-1"),
+                    ]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                try:
+                    await msg.edit_caption(
+                        caption=f"文件tg_file_id: {tg_file_id}",
+                        reply_markup=reply_markup
+                    )
+                except Exception:
+                    pass
+        
+        # 删除准备消息
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=prep_message_id)
+        except Exception:
+            pass  # 如果删除失败，忽略错误
+            
+    except Exception as e:
+        await context.bot.send_message(chat_id=chat_id, text=f'发送文件时出错：{str(e)}')
+        # 发生错误时也尝试删除准备消息
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=prep_message_id)
+        except Exception:
+            pass
+
 async def send_random_txt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     ensure_user(user_id)
@@ -229,102 +359,20 @@ async def send_random_txt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     file_id_or_path = random.choice(unsent_files)
     
-    # 检查是否是 tg_file_id
-    if file_id_or_path.startswith(('BQAC', 'CAAC', 'HDAA', 'BAAC', 'AgAC')):
-        # 直接使用 tg_file_id 发送文件
-        try:
-            if file_id_or_path.startswith('BQAC') or file_id_or_path.startswith('CAAC') or file_id_or_path.startswith('HDAA'):
-                msg = await update.message.reply_document(
-                    file_id_or_path,
-                    caption=f"文件tg_file_id: {file_id_or_path}"
-                )
-            elif file_id_or_path.startswith('BAAC'):
-                msg = await update.message.reply_video(
-                    file_id_or_path,
-                    caption=f"文件tg_file_id: {file_id_or_path}"
-                )
-            elif file_id_or_path.startswith('AgAC'):
-                msg = await update.message.reply_photo(
-                    file_id_or_path,
-                    caption=f"文件tg_file_id: {file_id_or_path}"
-                )
-            
-            # 记录发送
-            with SessionLocal() as session:
-                file = session.query(File).filter_by(tg_file_id=file_id_or_path).first()
-                if file:
-                    mark_file_sent(user_id, file.file_id)
-                else:
-                    # 如果是上传的文档，创建新的 File 记录
-                    uploaded_doc = session.query(UploadedDocument).filter_by(tg_file_id=file_id_or_path).first()
-                    if uploaded_doc:
-                        new_file = File(
-                            file_path=file_id_or_path,  # 使用 tg_file_id 作为路径
-                            tg_file_id=file_id_or_path,
-                            file_size=uploaded_doc.file_size
-                        )
-                        session.add(new_file)
-                        session.commit()
-                        mark_file_sent(user_id, new_file.file_id)
-        except Exception as e:
-            await update.message.reply_text(f'发送文件失败: {str(e)}')
-            return
-    else:
-        # 处理本地文件
-        file_path = file_id_or_path
-        ext = os.path.splitext(file_path)[1].lower()
-        image_exts = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
-        with open(file_path, 'rb') as f:
-            if ext == '.mp4':
-                msg = await update.message.reply_video(
-                    f,
-                    caption="正在生成文件ID..."
-                )
-                tg_file_id = msg.video.file_id
-            elif ext in image_exts:
-                msg = await update.message.reply_photo(
-                    f,
-                    caption="正在生成文件ID..."
-                )
-                tg_file_id = msg.photo[-1].file_id if msg.photo else None
-            else:
-                keyboard = [
-                    [
-                        InlineKeyboardButton("👍", callback_data=f"feedback|{{file_id}}|1"),
-                        InlineKeyboardButton("👎", callback_data=f"feedback|{{file_id}}|-1"),
-                    ]
-                ]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                msg = await update.message.reply_document(
-                    f,
-                    caption="正在生成文件ID...",
-                    reply_markup=reply_markup
-                )
-                tg_file_id = msg.document.file_id
-        file_id = get_or_create_file(file_path, tg_file_id)
-        mark_file_sent(user_id, file_id)
-        if ext == '.mp4' or ext in image_exts:
-            try:
-                await msg.edit_caption(
-                    caption=f"文件tg_file_id: {tg_file_id}"
-                )
-            except Exception:
-                pass
-        else:
-            keyboard = [
-                [
-                    InlineKeyboardButton("👍", callback_data=f"feedback|{file_id}|1"),
-                    InlineKeyboardButton("👎", callback_data=f"feedback|{file_id}|-1"),
-                ]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            try:
-                await msg.edit_caption(
-                    caption=f"文件tg_file_id: {tg_file_id}",
-                    reply_markup=reply_markup
-                )
-            except Exception:
-                pass
+    # 发送准备消息
+    prep_message = await update.message.reply_text('正在准备发送文件...')
+    
+    # 创建异步任务
+    context.job_queue.run_once(
+        send_file_job,
+        when=1,  # 1秒后开始执行
+        data={
+            'chat_id': update.effective_chat.id,
+            'file_id_or_path': file_id_or_path,
+            'user_id': user_id,
+            'prep_message_id': prep_message.message_id
+        }
+    )
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
