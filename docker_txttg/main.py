@@ -674,15 +674,15 @@ async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if tg_file_id and (tg_file_id.startswith('BQAC') or tg_file_id.startswith('CAAC') or tg_file_id.startswith('HDAA')):
                 await update.message.reply_document(tg_file_id, caption=f'文件tg_file_id: {tg_file_id}')
                 # 记录发送
-                mark_file_sent(user_id, file_id)
+                mark_file_sent(user_id, file_id, source='file')
             elif tg_file_id and tg_file_id.startswith('BAAC'):
                 await update.message.reply_video(tg_file_id, caption=f'文件tg_file_id: {tg_file_id}')
                 # 记录发送
-                mark_file_sent(user_id, file_id)
+                mark_file_sent(user_id, file_id, source='file')
             elif tg_file_id and tg_file_id.startswith('AgAC'):
                 await update.message.reply_photo(tg_file_id, caption=f'文件tg_file_id: {tg_file_id}')
                 # 记录发送
-                mark_file_sent(user_id, file_id)
+                mark_file_sent(user_id, file_id, source='file')
             elif tg_file_id is None or tg_file_id == '':
                 ext = os.path.splitext(file_path)[1].lower()
                 if ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']:
@@ -710,24 +710,24 @@ async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             file.tg_file_id = new_file_id
                             session.commit()
                     # 记录发送
-                    mark_file_sent(user_id, file_id)
+                    mark_file_sent(user_id, file_id, source='file')
             elif os.path.exists(file_path):
                 ext = os.path.splitext(file_path)[1].lower()
                 if ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']:
                     with open(file_path, 'rb') as f:
                         await update.message.reply_photo(f, caption=f'文件tg_file_id: {tg_file_id}')
                         # 记录发送
-                        mark_file_sent(user_id, file_id)
+                        mark_file_sent(user_id, file_id, source='file')
                 elif ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm']:
                     with open(file_path, 'rb') as f:
                         await update.message.reply_video(f, caption=f'文件tg_file_id: {tg_file_id}')
                         # 记录发送
-                        mark_file_sent(user_id, file_id)
+                        mark_file_sent(user_id, file_id, source='file')
                 else:
                     with open(file_path, 'rb') as f:
                         await update.message.reply_document(f, caption=f'文件tg_file_id: {tg_file_id}')
                         # 记录发送
-                        mark_file_sent(user_id, file_id)
+                        mark_file_sent(user_id, file_id, source='file')
             else:
                 await update.message.reply_text('文件丢失。')
         except Exception as e:

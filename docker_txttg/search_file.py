@@ -190,28 +190,16 @@ async def search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.answer('文件丢失', show_alert=True)
                 return
 
-            # 记录发送，添加 source 标识
+            # 记录发送，只记录到 sent_files 表
             with SessionLocal() as session:
-                # 首先检查是否已存在该 tg_file_id 的记录
-                file = session.query(File).filter_by(tg_file_id=tg_file_id).first()
-                if not file:
-                    # 如果是上传的文档，使用其信息创建记录
-                    uploaded_doc = session.query(UploadedDocument).filter_by(tg_file_id=tg_file_id).first()
-                    if uploaded_doc:
-                        file = File(
-                            file_path=uploaded_doc.download_path or tg_file_id,
-                            tg_file_id=tg_file_id,
-                            file_size=uploaded_doc.file_size
-                        )
-                        session.add(file)
-                        session.commit()
-                
-                if file:
+                # 获取上传文档信息
+                uploaded_doc = session.query(UploadedDocument).filter_by(id=file_id).first()
+                if uploaded_doc:
                     # 记录发送，并标记来源为 uploaded
                     date = datetime.now().strftime('%Y-%m-%d')
                     sent_file = SentFile(
                         user_id=query.from_user.id,
-                        file_id=file.file_id,
+                        file_id=uploaded_doc.id,  # 使用 uploaded_document 的 id
                         date=date,
                         source='uploaded'
                     )
