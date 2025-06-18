@@ -71,3 +71,4 @@ DOWNLOAD_DIR = os.path.join(os.getenv('TXT_ROOT', '/app/share_folder'), 'downloa
 
 API_BASE_URL = os.getenv('IDATARIVER_API_URL', 'https://open.idatariver.com/mapi')
 API_KEY = os.getenv('IDATARIVER_API_KEY')
+PAGE_SIZE = int(os.getenv('PAGE_SIZE', 10))  # 每页显示的结果数量
