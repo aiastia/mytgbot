@@ -181,10 +181,11 @@ def reload_txt_files():
                 skipped += 1
     return inserted, skipped
 
-def get_all_txt_files():
-    with SessionLocal() as session:
-        files = [row.file_path for row in session.query(File.file_path).all()]
-    return files
+# 此函数已被 get_unsent_files 中的直接查询替代，保留注释以供参考
+# def get_all_txt_files():
+#     with SessionLocal() as session:
+#         files = [row.file_path for row in session.query(File.file_path).all()]
+#     return files
 
 # 记录反馈
 def record_feedback(user_id, file_id, feedback):
@@ -194,8 +195,10 @@ def record_feedback(user_id, file_id, feedback):
         session.commit()
 
 def get_unsent_files(user_id):
-    all_files = get_all_txt_files()
     with SessionLocal() as session:
+        # 获取所有文件路径
+        all_files = [row.file_path for row in session.query(File.file_path).all()]
+        
         # 获取已收录的上传文档
         uploaded_docs = session.query(UploadedDocument).filter_by(
             status='approved'
@@ -204,16 +207,39 @@ def get_unsent_files(user_id):
             if doc.tg_file_id:  # 只要有 tg_file_id 就可以
                 all_files.append(doc.tg_file_id)
         
+        # 获取已发送的文件记录
+        sent_records = session.query(SentFile).filter_by(user_id=user_id).all()
+        
+        # 分别处理 File 表和 UploadedDocument 表的已发送记录
+        sent_file_ids = set()  # 存储 File 表的已发送记录
+        sent_uploaded_ids = set()  # 存储 UploadedDocument 表的已发送记录
+        
+        for record in sent_records:
+            if record.source == 'file':
+                sent_file_ids.add(record.file_id)
+            elif record.source == 'uploaded':
+                sent_uploaded_ids.add(record.file_id)
+        
+        # 获取文件映射
         file_map = {row.file_path: row.file_id for row in session.query(File.file_id, File.file_path).all()}
-        sent_ids = set(get_sent_file_ids(user_id))
-    unsent = []
-    for file_path in all_files:
-        file_id = file_map.get(file_path)
-        if file_id is None:
-            unsent.append(file_path)
-        elif file_id not in sent_ids:
-            unsent.append(file_path)
-    return unsent
+        uploaded_map = {doc.tg_file_id: doc.id for doc in uploaded_docs if doc.tg_file_id}
+        
+        # 找出未发送的文件
+        unsent = []
+        for file_path in all_files:
+            # 检查是否是上传文档的 tg_file_id
+            if file_path in uploaded_map:
+                if uploaded_map[file_path] not in sent_uploaded_ids:
+                    unsent.append(file_path)
+            # 检查是否是普通文件
+            elif file_path in file_map:
+                if file_map[file_path] not in sent_file_ids:
+                    unsent.append(file_path)
+            else:
+                # 如果既不在 uploaded_map 也不在 file_map 中，说明是新文件
+                unsent.append(file_path)
+                
+        return unsent
 
 async def send_file_job(context: ContextTypes.DEFAULT_TYPE):
     """异步任务：发送文件"""
@@ -222,6 +248,7 @@ async def send_file_job(context: ContextTypes.DEFAULT_TYPE):
     file_id_or_path = job_data['file_id_or_path']
     user_id = job_data['user_id']
     prep_message_id = job_data['prep_message_id']
+    source = job_data.get('source', 'file')  # 默认为 'file'
     
     try:
         # 检查是否是 tg_file_id
@@ -249,22 +276,16 @@ async def send_file_job(context: ContextTypes.DEFAULT_TYPE):
                 
                 # 记录发送
                 with SessionLocal() as session:
-                    # 首先检查是否已存在该 tg_file_id 的记录
-                    file = session.query(File).filter_by(tg_file_id=file_id_or_path).first()
-                    if not file:
-                        # 如果是上传的文档，使用其信息创建记录
+                    if source == 'file':
+                        # 如果是来自 File 表
+                        file = session.query(File).filter_by(tg_file_id=file_id_or_path).first()
+                        if file:
+                            mark_file_sent(user_id, file.file_id, source='file')
+                    else:
+                        # 如果是来自 UploadedDocument 表
                         uploaded_doc = session.query(UploadedDocument).filter_by(tg_file_id=file_id_or_path).first()
                         if uploaded_doc:
-                            file = File(
-                                file_path=uploaded_doc.download_path or file_id_or_path,
-                                tg_file_id=file_id_or_path,
-                                file_size=uploaded_doc.file_size
-                            )
-                            session.add(file)
-                            session.commit()
-                    
-                    if file:
-                        mark_file_sent(user_id, file.file_id)
+                            mark_file_sent(user_id, uploaded_doc.id, source='uploaded')
             except Exception as e:
                 await context.bot.send_message(chat_id=chat_id, text=f'发送文件失败: {str(e)}')
                 return
@@ -306,7 +327,7 @@ async def send_file_job(context: ContextTypes.DEFAULT_TYPE):
             
             # 使用 get_or_create_file 处理本地文件
             file_id = get_or_create_file(file_path, tg_file_id)
-            mark_file_sent(user_id, file_id)
+            mark_file_sent(user_id, file_id, source='file')
             
             if ext == '.mp4' or ext in image_exts:
                 try:
@@ -448,26 +469,19 @@ async def getfile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text('用法：/getfile <tg_file_id>')
         return
     tg_file_id = context.args[0]
-    if tg_file_id.startswith('BQAC') or tg_file_id.startswith('CAAC') or tg_file_id.startswith('HDAA'):
-        await update.message.reply_document(tg_file_id, caption=f'文件tg_file_id: {tg_file_id}')
-        return
-    elif tg_file_id.startswith('BAAC'):
-        await update.message.reply_video(tg_file_id, caption=f'文件tg_file_id: {tg_file_id}')
-        return
-    elif tg_file_id.startswith('AgAC'):
-        await update.message.reply_photo(tg_file_id, caption=f'文件tg_file_id: {tg_file_id}')
-        return
-    with SessionLocal() as session:
-        file = session.query(File).filter_by(tg_file_id=tg_file_id).first()
-        if not file:
-            await update.message.reply_text('未找到该文件。')
-            return
-        file_path = file.file_path
-    if not os.path.exists(file_path):
-        await update.message.reply_text('文件已丢失或被删除。')
-        return
-    with open(file_path, 'rb') as f:
-        await update.message.reply_document(f, caption=f'文件tg_file_id: {tg_file_id}')
+    
+    # 直接使用 tg_file_id 发送文件，不需要查询数据库
+    try:
+        if tg_file_id.startswith('BQAC') or tg_file_id.startswith('CAAC') or tg_file_id.startswith('HDAA'):
+            await update.message.reply_document(tg_file_id, caption=f'文件tg_file_id: {tg_file_id}')
+        elif tg_file_id.startswith('BAAC'):
+            await update.message.reply_video(tg_file_id, caption=f'文件tg_file_id: {tg_file_id}')
+        elif tg_file_id.startswith('AgAC'):
+            await update.message.reply_photo(tg_file_id, caption=f'文件tg_file_id: {tg_file_id}')
+        else:
+            await update.message.reply_text('无效的文件ID格式。')
+    except Exception as e:
+        await update.message.reply_text(f'发送文件失败: {str(e)}')
 
 # 处理评分回调，按钮高亮
 import telegram
