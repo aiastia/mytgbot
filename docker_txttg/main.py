@@ -107,7 +107,7 @@ def get_user_vip_level(user_id):
     with SessionLocal() as session:
         user = session.query(User).filter_by(user_id=user_id).first()
         if not user or not user.vip_level:
-            return 0
+            return 0, 10  # 返回等级和每日限制
         
         # 检查VIP是否过期
         if user.vip_expiry_date:
@@ -116,20 +116,17 @@ def get_user_vip_level(user_id):
                 # VIP已过期，重置等级
                 user.vip_level = 0
                 session.commit()
-                return 0
+                return 0, 10  # 返回等级和每日限制
         
-        return user.vip_level
-
-def get_user_daily_limit(user_id):
-    level = get_user_vip_level(user_id)  # 这个函数现在会检查VIP是否过期
-    if level == 3:
-        return 100
-    elif level == 2:
-        return 50
-    elif level == 1:
-        return 30
-    else:
-        return 10
+        # 根据等级返回每日限制
+        if user.vip_level == 3:
+            return user.vip_level, 100
+        elif user.vip_level == 2:
+            return user.vip_level, 50
+        elif user.vip_level == 1:
+            return user.vip_level, 30
+        else:
+            return user.vip_level, 10
 
 def get_sent_file_ids(user_id):
     with SessionLocal() as session:
@@ -137,15 +134,20 @@ def get_sent_file_ids(user_id):
     return ids
 
 def mark_file_sent(user_id, file_id, source='file'):
+    """记录文件发送历史，使用 merge 避免重复记录"""
     with SessionLocal() as session:
         date = datetime.now().strftime('%Y-%m-%d')
         session.merge(SentFile(user_id=user_id, file_id=file_id, date=date, source=source))
         session.commit()
 
 def get_today_sent_count(user_id):
+    """获取用户今日已发送文件数量，使用 count 优化查询"""
     with SessionLocal() as session:
         today = datetime.now().strftime('%Y-%m-%d')
-        count = session.query(SentFile).filter_by(user_id=user_id, date=today).count()
+        count = session.query(SentFile).filter_by(
+            user_id=user_id, 
+            date=today
+        ).count()
     return count
 
 def upgrade_files_table():
@@ -374,7 +376,9 @@ async def send_file_job(context: ContextTypes.DEFAULT_TYPE):
 async def send_random_txt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     ensure_user(user_id)
-    daily_limit = get_user_daily_limit(user_id)
+    
+    # 获取VIP等级和每日限制
+    vip_level, daily_limit = get_user_vip_level(user_id)
     if get_today_sent_count(user_id) >= daily_limit:
         await update.message.reply_text(f'每天最多只能领取{daily_limit}本，明天再来吧！')
         return
@@ -642,7 +646,7 @@ async def setviplevel_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if not args and update.message:
-        # 兼容 /start 无参数
+        # 显示欢迎信息
         welcome_text = """👋 欢迎使用文件分享机器人！
 
 🤖 这是一个文件分享机器人，你可以：
@@ -657,7 +661,8 @@ async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 如有问题，请联系管理员。"""
         await update.message.reply_text(welcome_text)
         return
-    # 支持 deep link
+
+    # 处理 deep link 参数
     if update.message:
         start_param = update.message.text.split(' ', 1)[1] if ' ' in update.message.text else ''
     elif update.callback_query:
@@ -665,92 +670,38 @@ async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         start_param = ''
     
-    if start_param.startswith('book_'):
-        # 检查用户权限
-        user_id = update.effective_user.id
-        vip_level = get_user_vip_level(user_id)  # 这个函数现在会检查VIP是否过期
-        if vip_level < 1:
-            if update.message:
-                await update.message.reply_text('只有VIP1及以上用户才能使用此功能。')
-            elif update.callback_query:
-                await update.callback_query.answer('只有VIP1及以上用户才能使用此功能。', show_alert=True)
-            return
-            
-        # 只解析 file_id
+    if start_param.startswith('upload_'):
+        # 处理上传文档
         try:
-            parts = start_param.split('_')
-            file_id = int(parts[1])
-        except Exception:
-            await update.message.reply_text('参数错误。')
-            return
-        with SessionLocal() as session:
-            file = session.query(File).filter_by(file_id=file_id).first()
-        if not file:
-            await update.message.reply_text('文件不存在。')
-            return
-        tg_file_id, file_path = file.tg_file_id, file.file_path
-        try:
-            if tg_file_id and (tg_file_id.startswith('BQAC') or tg_file_id.startswith('CAAC') or tg_file_id.startswith('HDAA')):
-                await update.message.reply_document(tg_file_id, caption=f'文件tg_file_id: {tg_file_id}')
-                # 记录发送
-                mark_file_sent(user_id, file_id, source='file')
-            elif tg_file_id and tg_file_id.startswith('BAAC'):
-                await update.message.reply_video(tg_file_id, caption=f'文件tg_file_id: {tg_file_id}')
-                # 记录发送
-                mark_file_sent(user_id, file_id, source='file')
-            elif tg_file_id and tg_file_id.startswith('AgAC'):
-                await update.message.reply_photo(tg_file_id, caption=f'文件tg_file_id: {tg_file_id}')
-                # 记录发送
-                mark_file_sent(user_id, file_id, source='file')
-            elif tg_file_id is None or tg_file_id == '':
-                ext = os.path.splitext(file_path)[1].lower()
-                if ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']:
-                    with open(file_path, 'rb') as f:
-                        msg = await update.message.reply_photo(f, caption='本地图片直传')
-                        new_file_id = msg.photo[-1].file_id if msg.photo else None
-                elif ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm']:
-                    with open(file_path, 'rb') as f:
-                        msg = await update.message.reply_video(f, caption='本地视频直传')
-                        new_file_id = msg.video.file_id
-                elif os.path.exists(file_path):
-                    with open(file_path, 'rb') as f:
-                        input_file = InputFile(f, read_file_handle=False)
-                        msg = await update.message.reply_document(input_file, caption='本地文件直传', write_timeout=300, connect_timeout=30)
-                        #msg = await update.message.reply_document(f, caption='本地文件直传')
-                        new_file_id = msg.document.file_id
+            doc_id = int(start_param.split('_')[1])
+            with SessionLocal() as session:
+                doc = session.query(UploadedDocument).filter_by(id=doc_id).first()
+                if doc and doc.tg_file_id:
+                    await update.message.reply_document(doc.tg_file_id)
+                    mark_file_sent(update.effective_user.id, doc_id, source='uploaded')
                 else:
-                    await update.message.reply_text('文件丢失。')
-                    return
-                # 关键：本地直传后写入tg_file_id
-                if new_file_id:
-                    with SessionLocal() as session:
-                        file = session.query(File).filter_by(file_id=file_id).first()
-                        if file:
-                            file.tg_file_id = new_file_id
-                            session.commit()
-                    # 记录发送
-                    mark_file_sent(user_id, file_id, source='file')
-            elif os.path.exists(file_path):
-                ext = os.path.splitext(file_path)[1].lower()
-                if ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']:
-                    with open(file_path, 'rb') as f:
-                        await update.message.reply_photo(f, caption=f'文件tg_file_id: {tg_file_id}')
-                        # 记录发送
-                        mark_file_sent(user_id, file_id, source='file')
-                elif ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm']:
-                    with open(file_path, 'rb') as f:
-                        await update.message.reply_video(f, caption=f'文件tg_file_id: {tg_file_id}')
-                        # 记录发送
-                        mark_file_sent(user_id, file_id, source='file')
-                else:
-                    with open(file_path, 'rb') as f:
-                        await update.message.reply_document(f, caption=f'文件tg_file_id: {tg_file_id}')
-                        # 记录发送
-                        mark_file_sent(user_id, file_id, source='file')
-            else:
-                await update.message.reply_text('文件丢失。')
+                    await update.message.reply_text('文件不存在或已被删除。')
         except Exception as e:
-            await update.message.reply_text(f'发送失败: {e}')
+            await update.message.reply_text(f'获取文件失败: {str(e)}')
+    elif start_param.startswith('file_'):
+        # 处理普通文件
+        try:
+            file_id = int(start_param.split('_')[1])
+            with SessionLocal() as session:
+                file = session.query(File).filter_by(file_id=file_id).first()
+                if file:
+                    if file.tg_file_id:
+                        await update.message.reply_document(file.tg_file_id)
+                    elif file.file_path and os.path.exists(file.file_path):
+                        with open(file.file_path, 'rb') as f:
+                            await update.message.reply_document(f)
+                    else:
+                        await update.message.reply_text('文件不存在或已被删除。')
+                    mark_file_sent(update.effective_user.id, file_id, source='file')
+                else:
+                    await update.message.reply_text('文件不存在或已被删除。')
+        except Exception as e:
+            await update.message.reply_text(f'获取文件失败: {str(e)}')
 
 async def user_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -763,7 +714,7 @@ async def user_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
             
         # 获取用户VIP信息
-        vip_level = user.vip_level
+        vip_level, daily_limit = get_user_vip_level(user_id)
         vip_date = user.vip_date
         vip_expiry_date = user.vip_expiry_date
         
@@ -775,7 +726,6 @@ async def user_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # 获取今日已接收文件数
         today_count = get_today_sent_count(user_id)
-        daily_limit = get_user_daily_limit(user_id)
         
         # 获取总接收文件数
         total_files = len(get_sent_file_ids(user_id))
