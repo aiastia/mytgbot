@@ -677,6 +677,15 @@ async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             with SessionLocal() as session:
                 doc = session.query(UploadedDocument).filter_by(id=doc_id).first()
                 if doc and doc.tg_file_id:
+                    # 先发送文件信息
+                    info_text = f"""📄 文件信息：
+• 文件名：{doc.file_name}
+• 上传时间：{doc.upload_time}
+• 文件大小：{doc.file_size} bytes
+
+正在发送文件..."""
+                    await update.message.reply_text(info_text)
+                    # 然后发送文件
                     await update.message.reply_document(doc.tg_file_id)
                     mark_file_sent(update.effective_user.id, doc_id, source='uploaded')
                 else:
@@ -690,6 +699,13 @@ async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             with SessionLocal() as session:
                 file = session.query(File).filter_by(file_id=file_id).first()
                 if file:
+                    # 先发送文件说明
+                    info_text = """📄 文件说明：
+这是一个通过 Telegram 机器人分享的文件。
+点击下方按钮下载文件。"""
+                    await update.message.reply_text(info_text)
+                    
+                    # 然后发送文件
                     if file.tg_file_id:
                         await update.message.reply_document(file.tg_file_id)
                     elif file.file_path and os.path.exists(file.file_path):
@@ -834,7 +850,7 @@ def main():
     application.add_handler(CommandHandler('batchapprove', batch_approve_command))  # 添加批量批准命令
     
     # 注册回调处理器
-    application.add_handler(CallbackQueryHandler(search_callback, pattern=r'^(spage|sget)\|'))
+    application.add_handler(CallbackQueryHandler(search_callback, pattern=r'^(spage\||upload_)'))
     application.add_handler(CallbackQueryHandler(ss_callback, pattern=r'^sspage\|'))
     application.add_handler(CallbackQueryHandler(feedback_callback, pattern=r'^feedback\|'))
     application.add_handler(CallbackQueryHandler(hot_callback, pattern=r'^hotpage\|'))

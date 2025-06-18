@@ -92,8 +92,8 @@ def build_uploaded_search_keyboard(results, page, keyword):
     page_results = results[start:end]
     keyboard = []
     for file_id, file_name, tg_file_id in page_results:
-        # 按钮 callback_data: sget|file_id
-        keyboard.append([InlineKeyboardButton(file_name, callback_data=f"sget|{file_id}")])
+        # 按钮 callback_data: upload_file_id
+        keyboard.append([InlineKeyboardButton(file_name, callback_data=f"upload_{file_id}")])
     # 分页按钮
     total_pages = math.ceil(len(results) / PAGE_SIZE)
     nav = []
@@ -131,8 +131,8 @@ async def search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         results = search_uploaded_files_by_name(keyword)
         reply_markup = build_uploaded_search_keyboard(results, page, keyword)
         await query.edit_message_reply_markup(reply_markup=reply_markup)
-    elif data[0] == 'sget':
-        file_id = int(data[1])
+    elif data[0].startswith('upload_'):
+        file_id = int(data[0].split('_')[1])
         row = get_uploaded_file_by_id(file_id)
         if not row:
             await query.answer('文件不存在', show_alert=True)
@@ -141,26 +141,26 @@ async def search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             # 判断 file_id 前缀类型
             if tg_file_id and (tg_file_id.startswith('BQAC') or tg_file_id.startswith('CAAC') or tg_file_id.startswith('HDAA')):
-                await query.message.reply_document(tg_file_id, caption=f'文件tg_file_id: {tg_file_id}')
+                await query.message.reply_document(tg_file_id, caption=f'📤 通过 Telegram 文件ID发送\n文件tg_file_id: {tg_file_id}')
             elif tg_file_id and tg_file_id.startswith('BAAC'):
-                await query.message.reply_video(tg_file_id, caption=f'文件tg_file_id: {tg_file_id}')
+                await query.message.reply_video(tg_file_id, caption=f'📤 通过 Telegram 文件ID发送\n文件tg_file_id: {tg_file_id}')
             elif tg_file_id and tg_file_id.startswith('AgAC'):
-                await query.message.reply_photo(tg_file_id, caption=f'文件tg_file_id: {tg_file_id}')
+                await query.message.reply_photo(tg_file_id, caption=f'📤 通过 Telegram 文件ID发送\n文件tg_file_id: {tg_file_id}')
             elif tg_file_id is None or tg_file_id == '':
                 # 没有 file_id，直接发本地文件，需判断文件类型
                 ext = os.path.splitext(file_path)[1].lower()
                 if ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']:
                     with open(file_path, 'rb') as f:
-                        msg = await query.message.reply_photo(f, caption='本地图片直传')
+                        msg = await query.message.reply_photo(f, caption='📥 通过本地文件发送\n正在生成文件ID...')
                         # 写入tg_file_id
                         new_file_id = msg.photo[-1].file_id if msg.photo else None
                 elif ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm']:
                     with open(file_path, 'rb') as f:
-                        msg = await query.message.reply_video(f, caption='本地视频直传')
+                        msg = await query.message.reply_video(f, caption='📥 通过本地文件发送\n正在生成文件ID...')
                         new_file_id = msg.video.file_id
                 elif os.path.exists(file_path):
                     with open(file_path, 'rb') as f:
-                        msg = await query.message.reply_document(f, caption='本地文件直传')
+                        msg = await query.message.reply_document(f, caption='📥 通过本地文件发送\n正在生成文件ID...')
                         new_file_id = msg.document.file_id
                 else:
                     await query.answer('文件丢失', show_alert=True)
@@ -168,20 +168,30 @@ async def search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # 更新数据库
                 if new_file_id:
                     update_uploaded_file_tg_id(file_id, new_file_id)
+                    # 更新消息
+                    try:
+                        if ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']:
+                            await msg.edit_caption(caption=f'📥 通过本地文件发送\n文件tg_file_id: {new_file_id}')
+                        elif ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm']:
+                            await msg.edit_caption(caption=f'📥 通过本地文件发送\n文件tg_file_id: {new_file_id}')
+                        else:
+                            await msg.edit_caption(caption=f'📥 通过本地文件发送\n文件tg_file_id: {new_file_id}')
+                    except Exception:
+                        pass
             elif os.path.exists(file_path):
                 ext = os.path.splitext(file_path)[1].lower()
                 if ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']:
                     with open(file_path, 'rb') as f:
-                        msg = await query.message.reply_photo(f, caption=f'文件tg_file_id: {tg_file_id}')
+                        msg = await query.message.reply_photo(f, caption=f'📥 通过本地文件发送\n文件tg_file_id: {tg_file_id}')
                         # 写入tg_file_id（如有变化）
                         new_file_id = msg.photo[-1].file_id if msg.photo else None
                 elif ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm']:
                     with open(file_path, 'rb') as f:
-                        msg = await query.message.reply_video(f, caption=f'文件tg_file_id: {tg_file_id}')
+                        msg = await query.message.reply_video(f, caption=f'📥 通过本地文件发送\n文件tg_file_id: {tg_file_id}')
                         new_file_id = msg.video.file_id
                 else:
                     with open(file_path, 'rb') as f:
-                        msg = await query.message.reply_document(f, caption=f'文件tg_file_id: {tg_file_id}')
+                        msg = await query.message.reply_document(f, caption=f'📥 通过本地文件发送\n文件tg_file_id: {tg_file_id}')
                         new_file_id = msg.document.file_id
                 # 更新数据库
                 if new_file_id and new_file_id != tg_file_id:
@@ -247,7 +257,7 @@ async def send_ss_page(update, context, keyword, page=0, edit=False):
     links = []
     for idx, (file_id, file_path, tg_file_id) in enumerate(page_rows, start+1):
         filename = os.path.basename(file_path)
-        link = f'https://t.me/{BOT_USERNAME}?start=book_{file_id}'
+        link = f'https://t.me/{BOT_USERNAME}?start=file_{file_id}'
         links.append(f'{idx}. <a href="{link}">{filename}</a>')
     msg = f'搜索结果，共{total}个文件：\n' + '\n'.join(links)
     
