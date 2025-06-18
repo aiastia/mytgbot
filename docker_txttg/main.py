@@ -13,6 +13,28 @@ from document_handler import handle_document, handle_document_callback, batch_ap
 from telegram.request import HTTPXRequest
 from points_system import checkin_command, points_command, exchange_callback, cancel_callback  # 添加导入
 from license_handler import redeem_command  # 添加导入
+import logging
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.engine import Engine
+import time
+
+# 配置 SQL 查询日志
+logging.basicConfig()
+logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
+
+# 添加查询计时器
+@event.listens_for(Engine, "before_cursor_execute")
+def before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+    conn.info.setdefault('query_start_time', []).append(time.time())
+
+@event.listens_for(Engine, "after_cursor_execute")
+def after_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+    total = time.time() - conn.info['query_start_time'].pop(-1)
+    print(f"执行 SQL 查询: {statement}")
+    print(f"参数: {parameters}")
+    print(f"耗时: {total:.3f} 秒")
+    print("-" * 50)
 
 # 加载环境变量
 load_dotenv()
@@ -34,6 +56,7 @@ print(f"Admin User IDs: {ADMIN_USER_ID}")
 # ORM操作示例函数
 
 def get_or_create_file(file_path, tg_file_id=None):
+    """获取或创建文件记录，返回文件ID"""
     with SessionLocal() as session:
         # 首先检查是否是上传的文档
         uploaded_doc = session.query(UploadedDocument).filter_by(download_path=file_path).first()
@@ -63,6 +86,8 @@ def get_or_create_file(file_path, tg_file_id=None):
                 file.tg_file_id = tg_file_id
                 session.commit()
             return file.file_id
+            
+        # 创建新文件记录
         file_size = None
         try:
             file_size = os.path.getsize(file_path)
@@ -197,6 +222,9 @@ def record_feedback(user_id, file_id, feedback):
         session.commit()
 
 def get_unsent_files(user_id):
+    """获取未发送的文件
+    返回格式: {'id': file_id, 'source': 'file'/'uploaded', 'tg_file_id': '...'} 或 {'id': file_id, 'source': 'file'/'uploaded', 'file_path': '...'}
+    """
     with SessionLocal() as session:
         # 获取所有文件ID
         file_ids = {row.file_id for row in session.query(File.file_id).all()}
@@ -218,7 +246,7 @@ def get_unsent_files(user_id):
         # 随机选择一个未发送的文件ID
         if unsent_file_ids and unsent_uploaded_ids:
             # 如果两个列表都有内容，随机选择一个列表
-            if random.random() < 0.7:
+            if random.random() < 0.7:  # 70%概率选择普通文件
                 file_id = random.choice(unsent_file_ids)
                 source = 'file'
             else:
