@@ -131,8 +131,8 @@ async def handle_document_callback(update: Update, context: ContextTypes.DEFAULT
         if action == "approve":
             doc.status = 'approved'
             doc.approved_by = user_id
-            # 给用户增加10积分
-            new_points = add_points(doc.user_id, 10)
+            # 给用户增加5积分
+            new_points = add_points(doc.user_id, 5)
             await query.edit_message_caption(
                 caption=query.message.caption + "\n\n✅ 已收录"
             )
@@ -140,7 +140,7 @@ async def handle_document_callback(update: Update, context: ContextTypes.DEFAULT
             try:
                 await context.bot.send_message(
                     chat_id=doc.user_id,
-                    text=f"您的文档《{doc.file_name}》已被管理员收录。\n获得10积分奖励！当前积分：{new_points}"
+                    text=f"您的文档《{doc.file_name}》已被管理员收录。\n获得5积分奖励！当前积分：{new_points}"
                 )
             except Exception as e:
                 print(f"通知用户失败: {e}")
@@ -178,8 +178,8 @@ async def handle_document_callback(update: Update, context: ContextTypes.DEFAULT
                 )
                 
                 doc.download_path = download_path
-                # 给用户增加10积分
-                new_points = add_points(doc.user_id, 10)
+                # 给用户增加5积分
+                new_points = add_points(doc.user_id, 5)
                 await query.edit_message_caption(
                     caption=query.message.caption + "\n\n✅ 已收录并下载"
                 )
@@ -187,7 +187,7 @@ async def handle_document_callback(update: Update, context: ContextTypes.DEFAULT
                 try:
                     await context.bot.send_message(
                         chat_id=doc.user_id,
-                        text=f"您的文档《{doc.file_name}》已被管理员收录。\n获得10积分奖励！当前积分：{new_points}"
+                        text=f"您的文档《{doc.file_name}》已被管理员收录。\n获得5积分奖励！当前积分：{new_points}"
                     )
                 except Exception as e:
                     print(f"通知用户失败: {e}")
@@ -250,15 +250,15 @@ async def batch_approve_command(update: Update, context: ContextTypes.DEFAULT_TY
         for doc in pending_docs:
             doc.status = 'approved'
             doc.approved_by = user_id
-            # 给用户增加10积分
-            new_points = add_points(doc.user_id, 10)
+            # 给用户增加5积分
+            new_points = add_points(doc.user_id, 5)
             approved_count += 1
             
             # 通知用户
             try:
                 await context.bot.send_message(
                     chat_id=doc.user_id,
-                    text=f"您的文档《{doc.file_name}》已被管理员收录。\n获得10积分奖励！当前积分：{new_points}"
+                    text=f"您的文档《{doc.file_name}》已被管理员收录。\n获得5积分奖励！当前积分：{new_points}"
                 )
             except Exception as e:
                 print(f"通知用户失败: {e}")
