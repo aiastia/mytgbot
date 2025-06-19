@@ -1,6 +1,6 @@
-from .orm_utils import get_engine, init_db
+from modules.db.orm_utils import get_engine, init_db
 from sqlalchemy import text, inspect
-from .orm_models import Base
+from modules.db.orm_models import Base
 
 def migrate_db():
     """数据库迁移工具"""

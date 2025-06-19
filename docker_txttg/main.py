@@ -17,6 +17,7 @@ from modules.handlers.handlers_user import user_stats, stats, on_start
 from modules.handlers.handlers_file import send_random_txt, getfile, reload_command, hot, hot_callback, send_hot_page, feedback_callback
 from modules.handlers.handlers_vip import setvip_command, setviplevel_command
 from modules.handlers.handlers_help import help_command
+from modules.db_migrate import migrate_db
 from modules.config.config import ADMIN_USER_ID, TXT_ROOT, TXT_EXTS
 from telegram.request import HTTPXRequest
 import logging
