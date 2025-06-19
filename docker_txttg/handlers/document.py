@@ -6,53 +6,94 @@ import os
 from datetime import datetime
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """处理文档上传"""
+    """处理用户上传的文档"""
+    if not update.message or not update.message.document:
+        return
+
     user_id = update.effective_user.id
-    
-    # 获取文件信息
     document = update.message.document
-    file_name = document.file_name
-    file_id = document.file_id
     
-    # 下载文件
-    file = await context.bot.get_file(file_id)
-    download_path = f"uploads/{file_name}"
-    os.makedirs("uploads", exist_ok=True)
-    await file.download_to_drive(download_path)
-    
-    # 保存到数据库
-    session = SessionLocal()
-    doc = UploadedDocument(
-        user_id=user_id,
-        file_name=file_name,
-        file_size=document.file_size,
-        download_path=download_path,
-        tg_file_id=file_id,
-        status='pending',
-        uploaded_at=datetime.now()
-    )
-    session.add(doc)
-    session.commit()
-    
-    # 通知管理员
+    # 检查文件类型
+    file_ext = os.path.splitext(document.file_name)[1].lower()
+    if file_ext not in ALLOWED_EXTENSIONS:
+        await update.message.reply_text("抱歉，只接受txt、epub、pdf和mobi格式的文件。")
+        return
+
+    # 检查是否重复
+    with SessionLocal() as session:
+        # 检查文件名和大小
+        existing = session.query(UploadedDocument).filter_by(
+            file_name=document.file_name,
+            file_size=document.file_size
+        ).first()
+        
+        if existing:
+            await update.message.reply_text("该文件已经上传过了。")
+            return
+            
+        # 检查 tg_file_id
+        existing_by_tg_id = session.query(UploadedDocument).filter_by(
+            tg_file_id=document.file_id
+        ).first()
+        
+        if existing_by_tg_id:
+            await update.message.reply_text("该文件已经上传过了。")
+            return
+
+        # 检查 files 表中是否存在相同文件
+        existing_file = session.query(File).filter(
+            (File.file_size == document.file_size) |
+            (File.file_path.like(f"%{document.file_name}"))
+        ).first()
+        
+        if existing_file:
+            await update.message.reply_text("该文件已经存在于系统中。")
+            return
+
+        # 创建新记录
+        new_doc = UploadedDocument(
+            user_id=user_id,
+            file_name=document.file_name,
+            file_size=document.file_size,
+            tg_file_id=document.file_id,
+            upload_time=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        )
+        session.add(new_doc)
+        session.commit()
+        doc_id = new_doc.id
+
+    # 创建管理员操作按钮
     keyboard = [
         [
-            InlineKeyboardButton("✅ 批准", callback_data=f"doc_approve_{doc.id}"),
-            InlineKeyboardButton("❌ 拒绝", callback_data=f"doc_reject_{doc.id}")
+            InlineKeyboardButton("收录", callback_data=f"doc_approve_{doc_id}"),
+            InlineKeyboardButton("收录并下载", callback_data=f"doc_approve_download_{doc_id}"),
+            InlineKeyboardButton("拒绝", callback_data=f"doc_reject_{doc_id}")
         ]
     ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    # 转发给所有管理员
+    admin_message = (
+        f"新文档上传通知\n"
+        f"用户ID: {user_id}\n"
+        f"文件名: {document.file_name}\n"
+        f"文件大小: {document.file_size} 字节\n"
+        f"上传时间: {new_doc.upload_time}"
+    )
     
-    for admin_id in ADMIN_IDS:
+    for admin_id in context.bot_data.get('admin_ids', []):
         try:
-            await context.bot.send_message(
+            await context.bot.send_document(
                 chat_id=admin_id,
-                text=f"新文件上传：\n用户：{user_id}\n文件名：{file_name}\n大小：{document.file_size} 字节",
-                reply_markup=InlineKeyboardMarkup(keyboard)
+                document=document.file_id,
+                caption=admin_message,
+                reply_markup=reply_markup,
+                disable_notification=True
             )
         except Exception as e:
-            print(f"通知管理员 {admin_id} 失败：{str(e)}")
-    
-    await update.message.reply_text("文件已上传，等待管理员审核。")
+            print(f"发送给管理员 {admin_id} 失败: {e}")
+
+    await update.message.reply_text("您的文档已提交给管理员审核。")
 
 async def handle_document_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """处理管理员对文档的操作"""
@@ -179,7 +220,6 @@ async def handle_document_callback(update: Update, context: ContextTypes.DEFAULT
             print(f"数据库更新失败: {str(e)}")
             session.rollback()
             await query.answer("操作失败，请重试")
-
 
 async def batch_approve_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """批量批准所有待审核的文档"""

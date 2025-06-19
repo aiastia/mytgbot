@@ -3,6 +3,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from utils.db import SessionLocal, User
 from config import VIP_PACKAGES, VIP_DAYS , ADMIN_IDS
+from services.user_service import set_user_vip_level
 from utils.calculations import (
     calculate_points_for_days,
     get_user_points
@@ -38,13 +39,6 @@ def get_vip_info(user_id: int) -> dict:
             'start_date': user.vip_date,
             'expiry_date': user.vip_expiry_date
         }
-
-def get_package_points(level: int, days: int) -> int:
-    """获取指定等级和天数的套餐积分"""
-    for pkg_level, pkg_days, points, _ in VIP_PACKAGES:
-        if pkg_level == level and pkg_days == days:
-            return points
-    return 0  # 无效的套餐组合
 
 def upgrade_vip_level(user_id: int, target_level: int, target_days: int) -> tuple[bool, str]:
     """升级或续费VIP等级"""
@@ -417,26 +411,3 @@ async def setviplevel_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     # 如果用户不是VIP或剩余天数小于30天，使用默认的set_user_vip_level函数
     set_user_vip_level(target_id, vip_level)
     await update.message.reply_text(f'用户 {target_id} VIP等级已设置为 {vip_level}')
-
-def set_user_vip_level(user_id, vip_level, days=30):
-    with SessionLocal() as session:
-        user = session.query(User).filter_by(user_id=user_id).first()
-        if user:
-            now = datetime.now()
-            if vip_level > 0:
-                # 如果是首次成为VIP，设置vip_date
-                if not user.vip_date:
-                    user.vip_date = now.strftime('%Y-%m-%d')
-                user.vip_level = vip_level
-                # 只有在没有过期时间或过期时间小于30天时才设置新的过期时间
-                if not user.vip_expiry_date:
-                    user.vip_expiry_date = (now + timedelta(days=days)).strftime('%Y-%m-%d')
-                else:
-                    expiry_date = datetime.strptime(user.vip_expiry_date, '%Y-%m-%d')
-                    if (expiry_date - now).days < 30:
-                        user.vip_expiry_date = (now + timedelta(days=days)).strftime('%Y-%m-%d')
-            else:
-                user.vip_level = 0
-                user.vip_expiry_date = None
-                # 不清除vip_date，保留首次成为VIP的记录
-            session.commit()

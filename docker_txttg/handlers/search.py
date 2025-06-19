@@ -1,7 +1,6 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from services.user_service import ensure_user, get_sent_file_ids, get_user_vip_level
-from services.file_service import mark_file_sent
+from services.user_service import get_user_vip_level
 from utils.db import SessionLocal, File, UploadedDocument, SentFile ,User
 from config import ADMIN_IDS,PAGE_SIZE
 import math
@@ -24,10 +23,6 @@ def set_bot_username(username):
     global BOT_USERNAME
     BOT_USERNAME = username
 
-def get_user_vip_level(user_id):
-    with SessionLocal() as session:
-        user = session.query(User).filter_by(user_id=user_id).first()
-        return user.vip_level if user else 0
 
 def get_file_by_id(file_id):
     with SessionLocal() as session:
