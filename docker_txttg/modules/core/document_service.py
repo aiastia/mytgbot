@@ -113,18 +113,49 @@ def get_pending_documents(session, page, page_size):
 async def batch_download_documents(session, docs, bot, download_dir):
     successful = 0
     failed = 0
+    failed_docs = []  # 记录下载失败的文档
+    error_details = {}  # 记录每个文档的错误详情
+    
     for doc in docs:
         try:
             file = await bot.get_file(doc.tg_file_id)
+            if not file:
+                raise Exception("无法获取文件信息")
+                
             file_name = doc.file_name
             os.makedirs(download_dir, exist_ok=True)
             download_path = os.path.join(download_dir, file_name).replace('\\', '/')
+            
+            # 检查文件是否已存在
+            if os.path.exists(download_path):
+                # 如果文件已存在，更新数据库状态
+                doc.download_path = download_path
+                doc.is_downloaded = True
+                successful += 1
+                continue
+                
             await file.download_to_drive(custom_path=download_path)
-            # 只更新对象状态，不commit
+            
+            # 验证文件是否成功下载
+            if not os.path.exists(download_path):
+                raise Exception("文件下载后未找到")
+                
             doc.download_path = download_path
             doc.is_downloaded = True
+            doc.download_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             successful += 1
+            
         except Exception as e:
             failed += 1
+            failed_docs.append(doc.id)
+            error_details[doc.id] = str(e)
+            print(f"文档 {doc.id} ({doc.file_name}) 下载失败: {e}")
             continue
-    return successful, failed
+            
+    # 返回更多详细信息以便处理
+    return {
+        'successful': successful,
+        'failed': failed,
+        'failed_docs': failed_docs,
+        'error_details': error_details
+    }

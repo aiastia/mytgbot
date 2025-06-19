@@ -203,35 +203,65 @@ async def download_pending_files(update: Update, context: ContextTypes.DEFAULT_T
     # 发送状态消息
     status_message = await message.reply_text('开始下载文件...')
     
+    session = SessionLocal()
     try:
         # 获取指定的文件ID
         file_ids = []
         if context.args:
             file_ids = [int(arg) for arg in context.args if arg.isdigit()]
         
-        with SessionLocal() as session:
-            # 如果没有指定ID，获取所有待下载的文件
-            if not file_ids:
-                docs, _, _ = get_pending_documents(session, 1, 9999)
-            else:
-                docs = session.query(UploadedDocument).filter(UploadedDocument.id.in_(file_ids)).all()
+        # 如果没有指定ID，获取所有待下载的文件
+        if not file_ids:
+            docs, _, _ = get_pending_documents(session, 1, 9999)
+        else:
+            docs = session.query(UploadedDocument).filter(UploadedDocument.id.in_(file_ids)).all()
             
-            if not docs:
-                await status_message.edit_text("📭 没有待下载的文件")
-                return
-                
-            successful, failed = await batch_download_documents(session, docs, context.bot, DOWNLOAD_DIR)
+        if not docs:
+            await status_message.edit_text("📭 没有待下载的文件")
+            session.close()
+            return
             
-            await status_message.edit_text(
-                f"📥 下载完成！\n"
-                f"✅ 成功: {successful}\n"
-                f"❌ 失败: {failed}\n"
-                f"📊 总计: {len(docs)}"
-            )
-            
+        # 批量下载文件
+        result = await batch_download_documents(session, docs, context.bot, DOWNLOAD_DIR)
+        successful = result['successful']
+        failed = result['failed']
+        error_details = result['error_details']
+        
+        # 构建状态消息
+        status_text = (
+            f"📥 下载完成！\n"
+            f"✅ 成功: {successful}\n"
+            f"❌ 失败: {failed}\n"
+            f"📊 总计: {len(docs)}"
+        )
+        
+        # 如果有失败的文件，添加错误详情
+        if failed > 0:
+            status_text += "\n\n❌ 失败详情:"
+            for doc_id, error in error_details.items():
+                # 限制每个错误消息的长度
+                error_msg = f"\n文档ID {doc_id}: {error[:100]}..." if len(error) > 100 else f"\n文档ID {doc_id}: {error}"
+                # 检查总消息长度是否接近Telegram限制
+                if len(status_text + error_msg) > 4000:
+                    status_text += "\n...(更多错误信息已省略)"
+                    break
+                status_text += error_msg
+        
+        # 提交事务
+        session.commit()
+        
+        # 更新状态消息
+        await status_message.edit_text(status_text)
+        
     except Exception as e:
-        await status_message.edit_text(f"❌ 发生错误: {str(e)}")
+        session.rollback()
+        error_msg = f"❌ 发生错误: {str(e)}"
         print(f"Error in download_pending_files: {str(e)}")
+        if len(error_msg) > 4096:
+            error_msg = error_msg[:4093] + "..."
+        await status_message.edit_text(error_msg)
+    finally:
+        session.close()
 
 async def list_pending_downloads(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """显示待下载文件的分页列表"""
@@ -281,6 +311,7 @@ async def list_pending_callback(update: Update, context: ContextTypes.DEFAULT_TY
     if len(data) != 2:
         await query.answer("无效的回调数据")
         return
+
     action = data[0]
     page = int(data[1])
     
@@ -300,29 +331,48 @@ async def list_pending_callback(update: Update, context: ContextTypes.DEFAULT_TY
             await query.answer("⚠️ 仅管理员可操作")
             return
             
-        # 使用一个session处理整个下载过程
-        with SessionLocal() as session:
-            try:
-                page_size = 5
-                docs, _, _ = get_pending_documents(session, page, page_size)
-                if not docs:
-                    await query.answer("当前页面没有可下载的文件")
-                    return
-                    
-                status_message = await query.message.reply_text('开始下载当前页文件...')
-                successful, failed = await batch_download_documents(session, docs, context.bot, DOWNLOAD_DIR)
+        status_message = None
+        session = SessionLocal()
+        try:
+            page_size = 5
+            docs, _, _ = get_pending_documents(session, page, page_size)
+            if not docs:
+                await query.answer("当前页面没有可下载的文件")
+                session.close()
+                return
                 
-                # 确保最后提交所有更改
-                session.commit()
-                
-                await status_message.edit_text(
-                    f"📥 下载完成！\n"
-                    f"✅ 成功: {successful}\n"
-                    f"❌ 失败: {failed}\n"
-                    f"📊 总计: {len(docs)}")
-                await query.answer("已完成当前页下载")
-            except Exception as e:
-                print(f"下载过程出错: {e}")
-                session.rollback()
-                if status_message:
-                    await status_message.edit_text(f"❌ 下载过程出错: {str(e)}")
+            status_message = await query.message.reply_text('开始下载当前页文件...')
+            
+            # 批量下载文件
+            result = await batch_download_documents(session, docs, context.bot, DOWNLOAD_DIR)
+            successful = result['successful']
+            failed = result['failed']
+            error_details = result['error_details']
+            
+            # 提交事务前确保更新状态消息
+            status_text = f"📥 下载完成！\n✅ 成功: {successful}\n❌ 失败: {failed}\n📊 总计: {len(docs)}"
+            
+            # 如果有失败的文件，添加错误详情
+            if failed > 0:
+                status_text += "\n\n❌ 失败详情:"
+                for doc_id, error in error_details.items():
+                    status_text += f"\n文档ID {doc_id}: {error[:100]}..." if len(error) > 100 else f"\n文档ID {doc_id}: {error}"
+            
+            # 确保提交事务
+            session.commit()
+            
+            # 更新状态消息
+            await status_message.edit_text(status_text)
+            await query.answer("已完成当前页下载")
+            
+        except Exception as e:
+            print(f"下载过程出错: {str(e)}")
+            session.rollback()
+            error_msg = f"❌ 下载过程出错: {str(e)}"
+            if len(error_msg) > 4096:  # Telegram消息长度限制
+                error_msg = error_msg[:4093] + "..."
+            if status_message:
+                await status_message.edit_text(error_msg)
+            await query.answer("下载出错，请查看错误信息")
+        finally:
+            session.close()
