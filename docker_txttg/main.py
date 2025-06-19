@@ -5,7 +5,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandle
 from modules.db.orm_utils import  init_db
 from modules.db.db_utils import *
 from modules.core.document_handler import handle_document, handle_document_callback, batch_approve_command, download_pending_files, list_pending_downloads, list_pending_callback
-from modules.core.points_system import checkin_command, points_command, exchange_callback, cancel_callback
+from modules.core.points_system import checkin_command, points_command, exchange_callback, cancel_callback, myid_command, transfer_points_command
 from modules.core.license_handler import redeem_command
 from modules.core.search_file import search_command, search_callback, ss_command, ss_callback, set_bot_username
 from modules.core.file_utils import *
@@ -97,6 +97,8 @@ def main():
     application.add_handler(CommandHandler('batchapprove', batch_approve_command))  # 添加批量批准命令
     application.add_handler(CommandHandler("download_pending", download_pending_files))
     application.add_handler(CommandHandler("list_pending", list_pending_downloads))
+    application.add_handler(CommandHandler("myid", myid_command))
+    application.add_handler(CommandHandler("transfer_points", transfer_points_command))
 
     # 注册回调处理器
     application.add_handler(CallbackQueryHandler(search_callback, pattern=r'^(spage\||upload_)'))

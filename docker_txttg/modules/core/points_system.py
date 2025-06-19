@@ -458,4 +458,50 @@ def get_package_points(level: int, days: int) -> int:
     for pkg_level, pkg_days, points, _ in VIP_PACKAGES:
         if pkg_level == level and pkg_days == days:
             return points
-    return 0  # 无效的套餐组合 
+    return 0  # 无效的套餐组合
+
+from telegram import Update
+from telegram.ext import ContextTypes
+from modules.db.orm_models import User
+from modules.db.orm_utils import SessionLocal
+
+async def myid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """回复用户自己的 Telegram ID"""
+    user_id = update.effective_user.id
+    await update.message.reply_text(f"您的 Telegram 用户ID: <code>{user_id}</code>", parse_mode='HTML')
+
+async def transfer_points_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """转移积分给其他用户: /transfer_points <user_id> <amount>"""
+    user_id = update.effective_user.id
+    args = context.args
+    if len(args) != 2 or not args[0].isdigit() or not args[1].isdigit():
+        await update.message.reply_text("用法: /transfer_points <对方用户ID> <积分数量>")
+        return
+    target_id = int(args[0])
+    amount = int(args[1])
+    if amount <= 0:
+        await update.message.reply_text("转账积分必须大于0")
+        return
+    if user_id == target_id:
+        await update.message.reply_text("不能给自己转账！")
+        return
+    with SessionLocal() as session:
+        sender = session.query(User).filter_by(user_id=user_id).first()
+        receiver = session.query(User).filter_by(user_id=target_id).first()
+        if not sender:
+            await update.message.reply_text("未找到您的账户信息，请先签到/使用积分功能激活账户。")
+            return
+        if not receiver:
+            await update.message.reply_text("未找到目标用户，请确认对方已使用过机器人。")
+            return
+        if sender.points < amount:
+            await update.message.reply_text(f"您的积分不足，当前积分: {sender.points}")
+            return
+        sender.points -= amount
+        receiver.points += amount
+        session.commit()
+        await update.message.reply_text(f"已成功转账 {amount} 积分给用户 {target_id}！\n您的新积分: {sender.points}")
+        try:
+            await context.bot.send_message(target_id, f"您收到来自 {user_id} 的 {amount} 积分！\n当前积分: {receiver.points}")
+        except Exception:
+            pass
