@@ -56,6 +56,8 @@ def get_help_text():
             "    /setvip - 设置用户VIP状态\n"
             "    /setviplevel - 设置用户VIP等级\n"
             "    /batchapprove - 批量批准上传的文件\n"
+            "    /download_pending - 批量下载的文件\n"
+            "   /list_pending - 显示文件清单\n"
         ),
         
         "tips": (
