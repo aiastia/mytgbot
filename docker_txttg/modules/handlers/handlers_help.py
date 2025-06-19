@@ -23,6 +23,7 @@ def get_help_text():
             "    /help - 显示此帮助信息\n"
             "    /user - 查看个人统计信息\n"
             "    /stats - 查看已接收文件数量\n"
+            "    /myid - 查询我的id\n"
         ),
         
         "file_commands": (
@@ -40,6 +41,7 @@ def get_help_text():
             "    /s - 搜索文件（仅VIP2可用）\n"
             "    /ss - 高级搜索（仅VIP3可用）\n"
             "    /redeem - 兑换积分码\n"
+            "    /transfer_points - 转移积分\n"
         ),
         
         "vip_levels": (
