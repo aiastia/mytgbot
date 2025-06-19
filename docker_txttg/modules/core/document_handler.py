@@ -477,31 +477,28 @@ async def list_pending_downloads(update: Update, context: ContextTypes.DEFAULT_T
 async def list_pending_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """处理待下载列表的回调按钮"""
     query = update.callback_query
-    
     data = query.data.split('_')
     if len(data) != 2:
         await query.answer("无效的回调数据")
         return
-    
     action = data[0]
     page = int(data[1])
-    
     if action == "pendinglist":
         try:
-            # 重新构建消息，调用 list_pending_downloads
             context.args = [str(page)]
             await list_pending_downloads(update, context)
             await query.answer()
         except BadRequest as e:
             if "message is not modified" in str(e).lower():
-                # 如果消息内容没有变化，只显示通知
                 await query.answer("列表已是最新状态")
             else:
-                # 其他错误则重新抛出
                 raise
-    
     elif action == "dlpending":
-        # 下载当前页的文件
+        # 批量下载当前页所有文件，并只用一个进度消息
+        user_id = update.effective_user.id
+        if user_id not in ADMIN_USER_ID:
+            await query.answer("⚠️ 仅管理员可操作")
+            return
         with SessionLocal() as session:
             page_size = 5
             docs = session.query(UploadedDocument).filter(
@@ -512,16 +509,55 @@ async def list_pending_callback(update: Update, context: ContextTypes.DEFAULT_TY
             ).offset(
                 (page - 1) * page_size
             ).limit(page_size).all()
-            
             doc_ids = [doc.id for doc in docs]
-        
         if not doc_ids:
             await query.answer("当前页面没有可下载的文件")
             return
-            
-        # 为每个文件ID调用下载函数
-        for doc_id in doc_ids:
-            context.args = [str(doc_id)]
-            await download_pending_files(update, context)
-        
-        await query.answer("已开始下载当前页的所有文件")
+        # 只发送一次状态消息
+        status_message = await query.message.reply_text('开始下载当前页文件...')
+        total_files = len(doc_ids)
+        successful = 0
+        failed = 0
+        for i, file_id in enumerate(doc_ids, 1):
+            try:
+                with SessionLocal() as session:
+                    doc = session.query(UploadedDocument).filter(UploadedDocument.id == file_id).first()
+                    if not doc:
+                        await status_message.edit_text(f"❌ 未找到ID为 {file_id} 的文件")
+                        failed += 1
+                        continue
+                    if doc.file_size >= 20 * 1024 * 1024:
+                        await status_message.edit_text(
+                            f"⚠️ 文件太大 (ID: {file_id}, 大小: {doc.file_size/1024/1024:.1f}MB)")
+                        failed += 1
+                        await asyncio.sleep(2)
+                        continue
+                    await status_message.edit_text(
+                        f"正在下载第 {i}/{total_files} 个文件...\n"
+                        f"✅ 成功: {successful}\n"
+                        f"❌ 失败: {failed}")
+                    file = await context.bot.get_file(doc.tg_file_id)
+                    file_name = doc.file_name
+                    os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+                    download_path = os.path.join(DOWNLOAD_DIR, file_name).replace('\\', '/')
+                    await file.download_to_drive(custom_path=download_path)
+                    doc.download_path = download_path
+                    doc.is_downloaded = True
+                    session.commit()
+                    successful += 1
+            except Exception as e:
+                await status_message.edit_text(
+                    f"下载第 {i}/{total_files} 个文件时出错\n"
+                    f"文件ID: {file_id}\n"
+                    f"错误信息: {str(e)}\n"
+                    f"✅ 成功: {successful}\n"
+                    f"❌ 失败: {failed + 1}")
+                failed += 1
+                await asyncio.sleep(2)
+                continue
+        await status_message.edit_text(
+            f"📥 下载完成！\n"
+            f"✅ 成功: {successful}\n"
+            f"❌ 失败: {failed}\n"
+            f"📊 总计: {total_files}")
+        await query.answer("已完成当前页下载")
