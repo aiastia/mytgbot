@@ -2,8 +2,8 @@ import os
 import math
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
-from .orm_utils import SessionLocal
-from .orm_models import User, File, UploadedDocument, SentFile
+from modules.db.orm_utils import SessionLocal
+from modules.db.orm_models import User, File, UploadedDocument, SentFile
 from datetime import datetime
 
 # 工具函数：分割长消息

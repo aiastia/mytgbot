@@ -1,8 +1,8 @@
 import os
 import requests
 from datetime import datetime
-from .orm_utils import SessionLocal
-from .orm_models import User, LicenseCode
+from modules.db.orm_utils import SessionLocal
+from modules.db.orm_models import User, LicenseCode
 from dotenv import load_dotenv
 
 # 加载环境变量

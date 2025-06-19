@@ -1,8 +1,8 @@
 import os
 import random
-from .orm_utils import SessionLocal
-from .orm_models import File, UploadedDocument, SentFile
-from .db_utils import get_or_create_file, mark_file_sent
+from modules.db.orm_utils import SessionLocal
+from modules.db.orm_models import File, UploadedDocument, SentFile
+from modules.db.db_utils import get_or_create_file, mark_file_sent
 
 TXT_ROOT = os.getenv('TXT_ROOT', '/app/share_folder')
 TXT_EXTS = [x.strip() for x in os.getenv('TXT_EXTS', '.txt,.pdf').split(',') if x.strip()]

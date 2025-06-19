@@ -2,8 +2,8 @@ import os
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from .orm_utils import SessionLocal
-from .orm_models import UploadedDocument, File
+from modules.db.orm_utils import SessionLocal
+from modules.db.orm_models import UploadedDocument, File
 from .points_system import add_points  # 添加导入
 
 # 允许的文件类型
@@ -268,4 +268,4 @@ async def batch_approve_command(update: Update, context: ContextTypes.DEFAULT_TY
             await update.message.reply_text(f'成功批准了 {approved_count} 个文档。')
         except Exception as e:
             session.rollback()
-            await update.message.reply_text(f'操作失败：{str(e)}') 
+            await update.message.reply_text(f'操作失败：{str(e)}')

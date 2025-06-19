@@ -4,27 +4,27 @@ from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
 from dotenv import load_dotenv
-from modules.orm_utils import SessionLocal, init_db
-from modules.orm_models import User, File, SentFile, FileFeedback, UploadedDocument
-from modules.db_migrate import migrate_db  # 导入数据库迁移函数
+from modules.db.orm_utils import SessionLocal, init_db
+from modules.db.orm_models import User, File, SentFile, FileFeedback, UploadedDocument
+from modules.db.db_utils import *
+from modules.core.document_handler import handle_document, handle_document_callback, batch_approve_command
+from modules.core.points_system import checkin_command, points_command, exchange_callback, cancel_callback
+from modules.core.license_handler import redeem_command
+from modules.core.search_file import search_command, search_callback, ss_command, ss_callback, set_bot_username
+from modules.core.file_utils import *
+from modules.core.bot_tasks import send_file_job
+from modules.handlers.handlers_user import user_stats, stats, on_start
+from modules.handlers.handlers_file import send_random_txt, getfile, reload_command, hot, hot_callback, send_hot_page, feedback_callback
+from modules.handlers.handlers_vip import setvip_command, setviplevel_command
+from modules.handlers.handlers_help import help_command
+from modules.config.config import ADMIN_USER_ID, TXT_ROOT, TXT_EXTS
 from telegram.request import HTTPXRequest
 import logging
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.engine import Engine
 import time
-from modules.db_utils import *
-from modules.file_utils import *
-from modules.bot_tasks import send_file_job
-from modules.handlers_user import user_stats, stats, on_start
-from modules.handlers_file import send_random_txt, getfile, reload_command, hot, hot_callback, send_hot_page, feedback_callback
-from modules.handlers_vip import setvip_command, setviplevel_command
-from modules.handlers_help import help_command
-from modules.search_file import search_command, search_callback, ss_command, ss_callback, set_bot_username
-from modules.points_system import checkin_command, points_command, exchange_callback, cancel_callback
-from modules.license_handler import redeem_command
-from modules.document_handler import handle_document, handle_document_callback, batch_approve_command
-from modules.config import ADMIN_USER_ID, TXT_ROOT, TXT_EXTS
+
 # 配置 SQL 查询日志
 logging.basicConfig()
 logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)

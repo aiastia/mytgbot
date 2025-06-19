@@ -1,8 +1,8 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from .orm_utils import SessionLocal
-from .orm_models import File, UploadedDocument
-from .db_utils import get_or_create_file, mark_file_sent
+from modules.db.orm_utils import SessionLocal
+from modules.db.orm_models import File, UploadedDocument
+from modules.db.db_utils import get_or_create_file, mark_file_sent
 import os
 
 async def send_file_job(context: ContextTypes.DEFAULT_TYPE):

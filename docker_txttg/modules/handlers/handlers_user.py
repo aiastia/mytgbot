@@ -1,7 +1,7 @@
-from .db_utils import *
-from .file_utils import *
-from .orm_utils import SessionLocal
-from .orm_models import User, File, UploadedDocument
+from modules.db.db_utils import *
+from modules.core.file_utils import *
+from modules.db.orm_utils import SessionLocal
+from modules.db.orm_models import User, File, UploadedDocument
 from telegram import Update
 from telegram.ext import ContextTypes
 from datetime import datetime

@@ -2,8 +2,8 @@ import random
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from .orm_utils import SessionLocal
-from .orm_models import User
+from modules.db.orm_utils import SessionLocal
+from modules.db.orm_models import User
 
 # VIP套餐配置
 VIP_DAYS = [3, 7, 30, 90, 180, 365]  # 所有有效的VIP套餐天数

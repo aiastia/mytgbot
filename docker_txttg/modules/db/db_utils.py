@@ -1,7 +1,7 @@
 import os
 from datetime import datetime, timedelta
-from .orm_utils import SessionLocal
-from .orm_models import User, File, SentFile, FileFeedback, UploadedDocument
+from orm_utils import SessionLocal
+from orm_models import User, File, SentFile, FileFeedback, UploadedDocument
 
 # 用户、文件、VIP、反馈等数据库操作
 
