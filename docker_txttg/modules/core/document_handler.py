@@ -191,42 +191,71 @@ async def batch_approve_command(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text(f'成功批准了 {approved_count} 个文档。')
 
 async def download_pending_files(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """下载待处理的文件"""
+    """下载待处理的文件，支持 all、all N、指定ID列表等参数"""
     user_id = update.effective_user.id
     if user_id not in ADMIN_USER_ID:
         await update.effective_message.reply_text("⚠️ 此命令仅限管理员使用")
         return
-        
+
     # 获取消息对象
     message = update.callback_query.message if update.callback_query else update.message
-    
-    # 发送状态消息
-    status_message = await message.reply_text('开始下载文件...')
-    
+
+    # 参数解析
+    args = context.args if context.args else []
+    arg_str = ' '.join(args).strip().lower()
+
+    # 用法提示
+    usage = (
+        "【用法说明】\n"
+        "1. <b>/download_pending all</b> —— 下载全部待下载文件\n"
+        "2. <b>/download_pending all 100</b> —— 下载前100个待下载文件\n"
+        "3. <b>/download_pending 123 456</b> —— 下载指定ID的文件（可多个）\n"
+        "4. <b>/download_pending 123</b> —— 下载ID为123的文件\n"
+        "\n如需帮助请联系管理员。"
+    )
+
+    if not args:
+        await message.reply_text(usage, parse_mode='HTML')
+        return
+
     session = SessionLocal()
+    status_message = None
     try:
-        # 获取指定的文件ID
-        file_ids = []
-        if context.args:
-            file_ids = [int(arg) for arg in context.args if arg.isdigit()]
-        
-        # 如果没有指定ID，获取所有待下载的文件
-        if not file_ids:
-            docs, _, _ = get_pending_documents(session, 1, 9999)
+        docs = []
+        # 1. all 或 all N
+        if args[0] == 'all':
+            limit = None
+            if len(args) > 1 and args[1].isdigit():
+                limit = int(args[1])
+            # 获取全部待下载文件
+            all_docs, _, _ = get_pending_documents(session, 1, 200)
+            docs = all_docs[:limit] if limit else all_docs
+            if not docs:
+                await message.reply_text("📭 没有待下载的文件")
+                session.close()
+                return
         else:
+            # 2. 指定ID列表
+            file_ids = [int(arg) for arg in args if arg.isdigit()]
+            if not file_ids:
+                await message.reply_text(f"参数无效！\n{usage}")
+                session.close()
+                return
             docs = session.query(UploadedDocument).filter(UploadedDocument.id.in_(file_ids)).all()
-            
-        if not docs:
-            await status_message.edit_text("📭 没有待下载的文件")
-            session.close()
-            return
-            
+            if not docs:
+                await message.reply_text("未找到指定ID的待下载文件")
+                session.close()
+                return
+
+        # 发送状态消息
+        status_message = await message.reply_text(f'开始下载 {len(docs)} 个文件...')
+
         # 批量下载文件
         result = await batch_download_documents(session, docs, context.bot, DOWNLOAD_DIR)
         successful = result['successful']
         failed = result['failed']
         error_details = result['error_details']
-        
+
         # 构建状态消息
         status_text = (
             f"📥 下载完成！\n"
@@ -234,32 +263,28 @@ async def download_pending_files(update: Update, context: ContextTypes.DEFAULT_T
             f"❌ 失败: {failed}\n"
             f"📊 总计: {len(docs)}"
         )
-        
-        # 如果有失败的文件，添加错误详情
         if failed > 0:
             status_text += "\n\n❌ 失败详情:"
             for doc_id, error in error_details.items():
-                # 限制每个错误消息的长度
                 error_msg = f"\n文档ID {doc_id}: {error[:100]}..." if len(error) > 100 else f"\n文档ID {doc_id}: {error}"
-                # 检查总消息长度是否接近Telegram限制
                 if len(status_text + error_msg) > 4000:
                     status_text += "\n...(更多错误信息已省略)"
                     break
                 status_text += error_msg
-        
-        # 提交事务
+
         session.commit()
-        
-        # 更新状态消息
         await status_message.edit_text(status_text)
-        
+
     except Exception as e:
         session.rollback()
         error_msg = f"❌ 发生错误: {str(e)}"
         print(f"Error in download_pending_files: {str(e)}")
-        if len(error_msg) > 4096:
-            error_msg = error_msg[:4093] + "..."
-        await status_message.edit_text(error_msg)
+        if status_message:
+            if len(error_msg) > 4096:
+                error_msg = error_msg[:4093] + "..."
+            await status_message.edit_text(error_msg)
+        else:
+            await message.reply_text(error_msg)
     finally:
         session.close()
 
