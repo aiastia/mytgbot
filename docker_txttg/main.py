@@ -16,13 +16,12 @@ from modules.handlers.handlers_file import send_random_txt, getfile, reload_comm
 from modules.handlers.handlers_vip import setvip_command, setviplevel_command
 from modules.handlers.handlers_help import help_command
 from modules.db_migrate import migrate_db
-from modules.config.config import ADMIN_USER_ID
 
 from telegram.request import HTTPXRequest
-from sqlalchemy import create_engine, event
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import event
 from sqlalchemy.engine import Engine
 
+from modules.config.config import ADMIN_USER_ID,TOKEN,DB_PATH
 
 # 配置 SQL 查询日志
 logging.basicConfig()
@@ -42,11 +41,11 @@ def after_cursor_execute(conn, cursor, statement, parameters, context, executema
     print("-" * 50)
 
 # 加载环境变量
-load_dotenv()
-TOKEN = os.getenv('BOT_TOKEN')
-TXT_ROOT = os.getenv('TXT_ROOT', '/app/share_folder')
-DB_PATH = './data/sent_files.db'
-TXT_EXTS = [x.strip() for x in os.getenv('TXT_EXTS', '.txt,.pdf').split(',') if x.strip()]
+# load_dotenv()
+# TOKEN = os.getenv('BOT_TOKEN')
+# TXT_ROOT = os.getenv('TXT_ROOT', '/app/share_folder')
+# DB_PATH = './data/sent_files.db'
+# TXT_EXTS = [x.strip() for x in os.getenv('TXT_EXTS', '.txt,.pdf').split(',') if x.strip()]
 
 # 数据库初始化和迁移
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -55,7 +54,7 @@ print("正在检查数据库更新...")
 migrate_db()  # 执行数据库迁移
 print("数据库检查完成")
 
-ADMIN_USER_ID = [int(x) for x in os.environ.get('ADMIN_USER_ID', '12345678').split(',') if x.strip().isdigit()]
+# ADMIN_USER_ID = [int(x) for x in os.environ.get('ADMIN_USER_ID', '12345678').split(',') if x.strip().isdigit()]
 print(f"Admin User IDs: {ADMIN_USER_ID}")
 
 # 只保留命令注册和主流程，所有 handler 通过 import 调用。

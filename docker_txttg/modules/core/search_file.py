@@ -5,16 +5,15 @@ from telegram.ext import ContextTypes
 from modules.db.orm_utils import SessionLocal
 from modules.db.orm_models import User, File, UploadedDocument, SentFile
 from datetime import datetime
-
+from modules.config.config import MAX_TG_MSG_LEN, PAGE_SIZE, BOT_USERNAME, SS_PAGE_SIZE
 # 工具函数：分割长消息
-MAX_TG_MSG_LEN = 4096
+# MAX_TG_MSG_LEN = 4096
 def split_message(text, max_length=MAX_TG_MSG_LEN):
     return [text[i:i+max_length] for i in range(0, len(text), max_length)]
-
-DB_PATH = './data/sent_files.db'
-PAGE_SIZE = 10
-BOT_USERNAME = None  # 由主程序注入
-SS_PAGE_SIZE = 10
+# DB_PATH = './data/sent_files.db'
+# PAGE_SIZE = 10
+# BOT_USERNAME = None  # 由主程序注入
+# SS_PAGE_SIZE = 10
 
 def set_bot_username(username):
     global BOT_USERNAME

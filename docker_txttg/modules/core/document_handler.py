@@ -5,12 +5,11 @@ from telegram.ext import ContextTypes
 from modules.db.orm_utils import SessionLocal
 from modules.db.orm_models import UploadedDocument, File
 from .points_system import add_points  # 添加导入
-
+from modules.config.config import  DOWNLOAD_DIR, ALLOWED_EXTENSIONS
 # 允许的文件类型
-ALLOWED_EXTENSIONS = {'.txt', '.epub', '.pdf', '.mobi'}
-
-# 下载目录
-DOWNLOAD_DIR = os.path.join(os.getenv('TXT_ROOT', '/app/share_folder'), 'downloaded_docs').replace('\\', '/')
+# ALLOWED_EXTENSIONS = {'.txt', '.epub', '.pdf', '.mobi'}
+# # 下载目录
+# DOWNLOAD_DIR = os.path.join(os.getenv('TXT_ROOT', '/app/share_folder'), 'downloaded_docs').replace('\\', '/')
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):

@@ -4,37 +4,37 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from modules.db.orm_utils import SessionLocal
 from modules.db.orm_models import User
+from modules.config.config import VIP_DAYS, VIP_PACKAGES
+# # VIP套餐配置
+# VIP_DAYS = [3, 7, 30, 90, 180, 365]  # 所有有效的VIP套餐天数
 
-# VIP套餐配置
-VIP_DAYS = [3, 7, 30, 90, 180, 365]  # 所有有效的VIP套餐天数
-
-# VIP套餐配置
-VIP_PACKAGES = [
-    # 格式: (等级, 天数, 积分, 描述)
-    # 短期套餐
-    (1, 3, 15, "3天VIP1"),
-    (1, 7, 35, "7天VIP1"),
+# # VIP套餐配置
+# VIP_PACKAGES = [
+#     # 格式: (等级, 天数, 积分, 描述)
+#     # 短期套餐
+#     (1, 3, 15, "3天VIP1"),
+#     (1, 7, 35, "7天VIP1"),
     
-    # 月度套餐
-    (1, 30, 120, "30天VIP1"),
-    (2, 30, 240, "30天VIP2"),
-    (3, 30, 400, "30天VIP3"),
+#     # 月度套餐
+#     (1, 30, 120, "30天VIP1"),
+#     (2, 30, 240, "30天VIP2"),
+#     (3, 30, 400, "30天VIP3"),
     
-    # 季度套餐
-    (1, 90, 300, "90天VIP1"),
-    (2, 90, 600, "90天VIP2"),
-    (3, 90, 1000, "90天VIP3"),
+#     # 季度套餐
+#     (1, 90, 300, "90天VIP1"),
+#     (2, 90, 600, "90天VIP2"),
+#     (3, 90, 1000, "90天VIP3"),
     
-    # 半年套餐
-    (1, 180, 500, "180天VIP1"),
-    (2, 180, 1000, "180天VIP2"),
-    (3, 180, 1800, "180天VIP3"),
+#     # 半年套餐
+#     (1, 180, 500, "180天VIP1"),
+#     (2, 180, 1000, "180天VIP2"),
+#     (3, 180, 1800, "180天VIP3"),
     
-    # 年度套餐
-    (1, 365, 1000, "365天VIP1"),
-    (2, 365, 2000, "365天VIP2"),
-    (3, 365, 3500, "365天VIP3"),
-]
+#     # 年度套餐
+#     (1, 365, 1000, "365天VIP1"),
+#     (2, 365, 2000, "365天VIP2"),
+#     (3, 365, 3500, "365天VIP3"),
+# ]
 
 def get_user_points(user_id: int) -> int:
     with SessionLocal() as session:

@@ -2,9 +2,9 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from .orm_models import Base
-
-DB_TYPE = os.getenv('DB_TYPE', 'sqlite')
-DB_PATH = './data/sent_files.db'
+from modules.config.config import DB_TYPE, DB_PATH
+# DB_TYPE = os.getenv('DB_TYPE', 'sqlite')
+# DB_PATH = './data/sent_files.db'
 
 def get_engine():
     if DB_TYPE == 'mysql':

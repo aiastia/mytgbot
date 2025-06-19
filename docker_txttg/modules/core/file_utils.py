@@ -2,9 +2,7 @@ import os
 import random
 from modules.db.orm_utils import SessionLocal
 from modules.db.orm_models import File, UploadedDocument, SentFile
-
-TXT_ROOT = os.getenv('TXT_ROOT', '/app/share_folder')
-TXT_EXTS = [x.strip() for x in os.getenv('TXT_EXTS', '.txt,.pdf').split(',') if x.strip()]
+from modules.config.config import TXT_ROOT, TXT_EXTS
 
 def reload_txt_files():
     txt_files = []

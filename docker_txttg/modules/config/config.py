@@ -6,6 +6,7 @@ load_dotenv()
 
 # 从环境变量读取配置
 TOKEN = os.getenv('BOT_TOKEN')
+
 # 管理员用户ID列表
 ADMIN_USER_ID = [int(id) for id in os.getenv('ADMIN_USER_ID', '').split(',') if id]
 TXT_ROOT = os.getenv('TXT_ROOT', '/app/share_folder')
@@ -13,6 +14,7 @@ TXT_ROOT = os.getenv('TXT_ROOT', '/app/share_folder')
 UPLOAD_DIR = os.getenv('UPLOAD_DIR', './uploads')
 TELEGRAM_API_URL = os.getenv('TELEGRAM_API_URL')
 TXT_EXTS = [x.strip() for x in os.getenv('TXT_EXTS', '.txt,.pdf').split(',') if x.strip()]
+# 允许的文件扩展名
 ALLOWED_EXTENSIONS = {'.txt', '.epub', '.pdf', '.mobi'}
 # 下载目录
 DOWNLOAD_DIR = os.path.join(os.getenv('TXT_ROOT', '/app/share_folder'), 'downloaded_docs').replace('\\', '/')
@@ -41,6 +43,11 @@ READ_TIMEOUT = 1810
 WRITE_TIMEOUT = 1810
 POOL_TIMEOUT = 60
 MEDIA_WRITE_TIMEOUT = 1810
+MAX_TG_MSG_LEN = 4096
+SS_PAGE_SIZE = 10  # 每页显示的搜索结果数量
+PAGE_SIZE = 10   # 每页显示的结果数量
+BOT_USERNAME= os.getenv('BOT_USERNAME', 'None')
+HOT_PAGE_SIZE = 10
 
 # VIP套餐配置
 VIP_DAYS = [3, 7, 30, 90, 180, 365]  # 所有有效的VIP套餐天数

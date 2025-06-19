@@ -4,13 +4,13 @@ from datetime import datetime
 from modules.db.orm_utils import SessionLocal
 from modules.db.orm_models import User, LicenseCode
 from dotenv import load_dotenv
-
+from modules.config.config import API_BASE_URL, API_KEY
 # 加载环境变量
-load_dotenv()
+# load_dotenv()
 
-# API Configuration from environment variables
-API_BASE_URL = os.getenv('IDATARIVER_API_URL', 'https://open.idatariver.com/mapi')
-API_KEY = os.getenv('IDATARIVER_API_KEY')
+# # API Configuration from environment variables
+# API_BASE_URL = os.getenv('IDATARIVER_API_URL', 'https://open.idatariver.com/mapi')
+# API_KEY = os.getenv('IDATARIVER_API_KEY')
 
 if not API_KEY:
     raise ValueError("IDATARIVER_API_KEY environment variable is not set")

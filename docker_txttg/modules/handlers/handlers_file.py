@@ -6,8 +6,8 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from datetime import datetime, timedelta
 import os
-from modules.config.config import ADMIN_USER_ID
 from modules.core.bot_tasks import send_file_job
+from modules.config.config import ADMIN_USER_ID, HOT_PAGE_SIZE
 
 async def send_random_txt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -58,7 +58,6 @@ async def reload_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     inserted, skipped = reload_txt_files()
     await update.message.reply_text(f'刷新完成，新增 {inserted} 个文件，跳过 {skipped} 个已存在。')
 
-HOT_PAGE_SIZE = 10
 
 async def hot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_hot_page(update, context, page=0, edit=False)
