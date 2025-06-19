@@ -1,10 +1,11 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
+from modules.config.config import REDEM_URL
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = get_help_text()
     keyboard = [
-        [InlineKeyboardButton("💎 购买积分", url="https://t.me/iDataRiver_Bot?start=M_685017ebfaa790cf11d677bd")]
+        [InlineKeyboardButton("💎 购买积分", url=REDEM_URL)]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(help_text, parse_mode='HTML', reply_markup=reply_markup)
