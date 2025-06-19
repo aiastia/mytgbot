@@ -8,6 +8,7 @@ from ..config.config import ADMIN_USER_ID, DOWNLOAD_DIR, ALLOWED_EXTENSIONS
 from modules.db.orm_utils import SessionLocal
 from modules.db.orm_models import UploadedDocument, File
 from .points_system import add_points  # 添加导入
+from .document_service import check_duplicate_and_save
 # 允许的文件类型
 # ALLOWED_EXTENSIONS = {'.txt', '.epub', '.pdf', '.mobi'}
 # # 下载目录
@@ -28,48 +29,19 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("抱歉，只接受txt、epub、pdf和mobi格式的文件。")
         return
 
-    # 检查是否重复
     with SessionLocal() as session:
-        # 检查文件名和大小
-        existing = session.query(UploadedDocument).filter_by(
-            file_name=document.file_name,
-            file_size=document.file_size
-        ).first()
-        
-        if existing:
+        result = check_duplicate_and_save(session, document, user_id)
+        if result == "duplicate":
             await update.message.reply_text("该文件已经上传过了。")
             return
-            
-        # 检查 tg_file_id
-        existing_by_tg_id = session.query(UploadedDocument).filter_by(
-            tg_file_id=document.file_id
-        ).first()
-        
-        if existing_by_tg_id:
-            await update.message.reply_text("该文件已经上传过了。")
-            return
-
-        # 检查 files 表中是否存在相同文件
-        existing_file = session.query(File).filter(
-            (File.file_size == document.file_size) |
-            (File.file_path.like(f"%{document.file_name}"))
-        ).first()
-        
-        if existing_file:
+        if result == "exists_in_system":
             await update.message.reply_text("该文件已经存在于系统中。")
             return
-
-        # 创建新记录
-        new_doc = UploadedDocument(
-            user_id=user_id,
-            file_name=document.file_name,
-            file_size=document.file_size,
-            tg_file_id=document.file_id,
-            upload_time=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        )
-        session.add(new_doc)
-        session.commit()
-        doc_id = new_doc.id
+        if isinstance(result, UploadedDocument):
+            doc_id = result.id
+        else:
+            await update.message.reply_text("文件保存失败，请重试。")
+            return
 
     # 创建管理员操作按钮
     keyboard = [
