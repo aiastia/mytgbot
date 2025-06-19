@@ -4,7 +4,8 @@ from datetime import datetime
 from modules.db.orm_utils import SessionLocal
 from modules.db.orm_models import User, LicenseCode
 from dotenv import load_dotenv
-from modules.config.config import API_BASE_URL, API_KEY
+from modules.config.config import API_BASE_URL, API_KEY, REDEM_URL
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 # 加载环境变量
 # load_dotenv()
 
@@ -111,7 +112,16 @@ def redeem_license_code(user_id, code):
 async def redeem_command(update, context):
     """Handle /redeem command"""
     if not context.args:
-        await update.message.reply_text("用法: /redeem <兑换码>")
+        help_text = (
+            "📝 用法: /redeem <code>兑换码</code>\n"
+            "例如: /redeem ABC123\n\n"
+            "🔑 没有兑换码？点击下方按钮购买"
+        )
+        keyboard = [
+            [InlineKeyboardButton("💎 购买兑换码", url=REDEM_URL)]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(help_text, parse_mode='HTML', reply_markup=reply_markup)
         return
     
     code = context.args[0].strip()
@@ -119,3 +129,5 @@ async def redeem_command(update, context):
     
     success, message = redeem_license_code(user_id, code)
     await update.message.reply_text(message) 
+
+    

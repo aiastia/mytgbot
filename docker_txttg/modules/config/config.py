@@ -18,7 +18,7 @@ TXT_EXTS = [x.strip() for x in os.getenv('TXT_EXTS', '.txt,.pdf').split(',') if 
 ALLOWED_EXTENSIONS = {'.txt', '.epub', '.pdf', '.mobi'}
 # 下载目录
 DOWNLOAD_DIR = os.path.join(os.getenv('TXT_ROOT', '/app/share_folder'), 'downloaded_docs').replace('\\', '/')
-
+REDEM_URL="https://t.me/iDataRiver_Bot?start=M_685017ebfaa790cf11d677bd"
 API_BASE_URL = os.getenv('IDATARIVER_API_URL', 'https://open.idatariver.com/mapi')
 API_KEY = os.getenv('IDATARIVER_API_KEY')
 PAGE_SIZE = int(os.getenv('PAGE_SIZE', 10))  # 每页显示的结果数量
