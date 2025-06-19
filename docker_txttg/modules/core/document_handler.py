@@ -283,6 +283,7 @@ async def list_pending_callback(update: Update, context: ContextTypes.DEFAULT_TY
         return
     action = data[0]
     page = int(data[1])
+    
     if action == "pendinglist":
         try:
             context.args = [str(page)]
@@ -298,17 +299,30 @@ async def list_pending_callback(update: Update, context: ContextTypes.DEFAULT_TY
         if user_id not in ADMIN_USER_ID:
             await query.answer("⚠️ 仅管理员可操作")
             return
+            
+        # 使用一个session处理整个下载过程
         with SessionLocal() as session:
-            page_size = 5
-            docs, _, _ = get_pending_documents(session, page, page_size)
-        if not docs:
-            await query.answer("当前页面没有可下载的文件")
-            return
-        status_message = await query.message.reply_text('开始下载当前页文件...')
-        successful, failed = await batch_download_documents(session, docs, context.bot, DOWNLOAD_DIR)
-        await status_message.edit_text(
-            f"📥 下载完成！\n"
-            f"✅ 成功: {successful}\n"
-            f"❌ 失败: {failed}\n"
-            f"📊 总计: {len(docs)}")
-        await query.answer("已完成当前页下载")
+            try:
+                page_size = 5
+                docs, _, _ = get_pending_documents(session, page, page_size)
+                if not docs:
+                    await query.answer("当前页面没有可下载的文件")
+                    return
+                    
+                status_message = await query.message.reply_text('开始下载当前页文件...')
+                successful, failed = await batch_download_documents(session, docs, context.bot, DOWNLOAD_DIR)
+                
+                # 确保最后提交所有更改
+                session.commit()
+                
+                await status_message.edit_text(
+                    f"📥 下载完成！\n"
+                    f"✅ 成功: {successful}\n"
+                    f"❌ 失败: {failed}\n"
+                    f"📊 总计: {len(docs)}")
+                await query.answer("已完成当前页下载")
+            except Exception as e:
+                print(f"下载过程出错: {e}")
+                session.rollback()
+                if status_message:
+                    await status_message.edit_text(f"❌ 下载过程出错: {str(e)}")

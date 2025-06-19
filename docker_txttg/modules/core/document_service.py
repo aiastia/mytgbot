@@ -120,9 +120,9 @@ async def batch_download_documents(session, docs, bot, download_dir):
             os.makedirs(download_dir, exist_ok=True)
             download_path = os.path.join(download_dir, file_name).replace('\\', '/')
             await file.download_to_drive(custom_path=download_path)
+            # 只更新对象状态，不commit
             doc.download_path = download_path
             doc.is_downloaded = True
-            session.commit()
             successful += 1
         except Exception as e:
             failed += 1
