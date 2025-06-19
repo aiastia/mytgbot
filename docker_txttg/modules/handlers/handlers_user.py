@@ -46,6 +46,9 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if not args and update.message:
+        user_id = update.effective_user.id
+
+        ensure_user(user_id) 
         welcome_text = """👋 欢迎使用文件分享机器人！\n\n🤖 这是一个文件分享机器人，你可以：\n• 搜索和获取文件\n• 每日签到获取积分\n• 使用积分兑换VIP\n\n📚 发送 /help 查看完整使用指南\n🎯 发送 /checkin 进行每日签到\n🔍 发送 /search 搜索文件\n\n如有问题，请联系管理员。"""
         await update.message.reply_text(welcome_text)
         return
