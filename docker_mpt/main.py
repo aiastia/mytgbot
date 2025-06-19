@@ -135,24 +135,28 @@ class BotAccount:
             await self.handle_account_command(event)
     
     async def handle_message(self, event):
-        """处理新消息"""
+        """处理新消息，支持群组、频道和私聊"""
         try:
-            # 检查是否是私聊
-            if not event.is_private:
-                return
+            # 判断是否为私聊、群组或频道
+            is_private = event.is_private
+            is_group = event.is_group
+            is_channel = event.is_channel
 
-            # 检查是否是机器人消息
-            if not event.message.sender.bot:
-                return
-
-            # 获取机器人用户名
-            bot_username = event.message.sender.username
-            if not bot_username:
-                return
-
-            # 检查是否在监控列表中
-            if (self.config['monitoring']['bot_usernames'] and 
-                bot_username not in self.config['monitoring']['bot_usernames']):
+            # 只处理配置中允许的群组/频道/私聊
+            enabled_chats = self.config['monitoring'].get('enabled_chats', [])
+            if (is_group or is_channel) and enabled_chats:
+                if event.chat_id not in enabled_chats:
+                    return
+            elif is_private:
+                # 私聊可选是否只处理机器人
+                if self.config['monitoring'].get('bot_usernames'):
+                    if not event.message.sender or not getattr(event.message.sender, 'bot', False):
+                        return
+                    bot_username = getattr(event.message.sender, 'username', None)
+                    if bot_username and bot_username not in self.config['monitoring']['bot_usernames']:
+                        return
+            else:
+                # 既不是私聊也不是群组/频道
                 return
 
             # 记录消息
@@ -160,18 +164,18 @@ class BotAccount:
                 account_id=self.db_account.id,
                 message_id=event.message.id,
                 chat_id=event.chat_id,
-                chat_title=event.chat.title if event.chat.title else "Private Chat",
+                chat_title=event.chat.title if hasattr(event.chat, 'title') and event.chat.title else "Chat",
                 sender_id=event.message.sender_id,
-                sender_username=bot_username,
+                sender_username=getattr(event.message.sender, 'username', None),
                 message_text=event.message.text or event.message.caption or "",
                 timestamp=datetime.now(),
-                is_bot=True,
+                is_bot=getattr(event.message.sender, 'bot', False),
                 is_forwarded=event.message.forward is not None
             )
 
             # 检查关键词
             detected_keywords = []
-            if message.message_text:  # 只在有文本内容时检查关键词
+            if message.message_text:
                 for keyword in self.keywords:
                     if keyword.is_regex:
                         if re.search(keyword.pattern, message.message_text, re.IGNORECASE):
@@ -188,14 +192,11 @@ class BotAccount:
             # 处理媒体文件
             if event.message.media:
                 await self.handle_media(event.message)
-                # 如果启用了自动转发媒体文件，直接触发转发
                 if self.config['monitoring']['auto_forward_media']:
                     await self.handle_forwarding(event.message, detected_keywords, force_forward=True)
                 elif detected_keywords:
-                    # 否则只在有关键词时转发
                     await self.handle_forwarding(event.message, detected_keywords)
             elif detected_keywords:
-                # 如果是文本消息且有关键词，才触发转发
                 await self.handle_forwarding(event.message, detected_keywords)
 
         except Exception as e:
@@ -636,4 +637,4 @@ async def main():
             await account.client.disconnect()
 
 if __name__ == '__main__':
-    asyncio.run(main()) 
+    asyncio.run(main())
