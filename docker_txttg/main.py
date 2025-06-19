@@ -2,8 +2,6 @@ import os
 import logging
 import time
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters
-from dotenv import load_dotenv
-
 from modules.db.orm_utils import  init_db
 from modules.db.db_utils import *
 from modules.core.document_handler import handle_document, handle_document_callback, batch_approve_command
