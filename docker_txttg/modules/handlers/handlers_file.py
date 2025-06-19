@@ -1,13 +1,12 @@
 from modules.db.db_utils import *
 from modules.core.file_utils import *
 from modules.db.orm_utils import SessionLocal
-from modules.db.orm_models import File, FileFeedback, UploadedDocument, User
+from modules.db.orm_models import File, FileFeedback
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from datetime import datetime, timedelta
 import os
-import random
-from modules.config.config import TXT_ROOT, TXT_EXTS, ADMIN_USER_ID
+from modules.config.config import ADMIN_USER_ID
 from modules.core.bot_tasks import send_file_job
 
 async def send_random_txt(update: Update, context: ContextTypes.DEFAULT_TYPE):
