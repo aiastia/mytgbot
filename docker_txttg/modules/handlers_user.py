@@ -1,5 +1,5 @@
-from db_utils import *
-from file_utils import *
+from docker_txttg.modules.db_utils import *
+from docker_txttg.modules.file_utils import *
 from orm_utils import SessionLocal
 from orm_models import User, File, UploadedDocument
 from telegram import Update

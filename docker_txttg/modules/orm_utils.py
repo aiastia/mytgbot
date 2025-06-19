@@ -1,7 +1,7 @@
 import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from orm_models import Base
+from docker_txttg.modules.orm_models import Base
 
 DB_TYPE = os.getenv('DB_TYPE', 'sqlite')
 DB_PATH = './data/sent_files.db'

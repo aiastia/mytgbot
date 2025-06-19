@@ -1,6 +1,6 @@
-from orm_utils import get_engine, init_db
+from docker_txttg.modules.orm_utils import get_engine, init_db
 from sqlalchemy import text, inspect
-from orm_models import Base
+from docker_txttg.modules.orm_models import Base
 
 def migrate_db():
     """数据库迁移工具"""

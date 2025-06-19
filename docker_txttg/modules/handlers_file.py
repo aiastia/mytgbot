@@ -1,5 +1,5 @@
-from db_utils import *
-from file_utils import *
+from docker_txttg.modules.db_utils import *
+from docker_txttg.modules.file_utils import *
 from orm_utils import SessionLocal
 from orm_models import File, FileFeedback, UploadedDocument, User
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -7,8 +7,8 @@ from telegram.ext import ContextTypes
 from datetime import datetime, timedelta
 import os
 import random
-from config import TXT_ROOT, TXT_EXTS, ADMIN_USER_ID
-from bot_tasks import send_file_job
+from docker_txttg.modules.config import TXT_ROOT, TXT_EXTS, ADMIN_USER_ID
+from docker_txttg.modules.bot_tasks import send_file_job
 
 async def send_random_txt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id

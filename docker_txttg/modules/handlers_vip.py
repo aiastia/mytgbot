@@ -1,10 +1,10 @@
-from db_utils import *
+from docker_txttg.modules.db_utils import *
 from orm_utils import SessionLocal
 from orm_models import User
 from telegram import Update
 from telegram.ext import ContextTypes
 from datetime import datetime, timedelta
-from config import ADMIN_USER_ID
+from docker_txttg.modules.config import ADMIN_USER_ID
 async def setvip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in ADMIN_USER_ID:
