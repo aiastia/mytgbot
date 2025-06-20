@@ -184,6 +184,14 @@ def setup_handlers(client, account_config, account_name, db_account, text_watch_
     async def _handle_msginfo_command(event):
         await handle_msginfo_command(event, client, account_config, account_name)
     
+    @client.on(events.NewMessage(pattern='/unwatch_text'))
+    async def _handle_unwatch_text_command(event):
+        await handle_unwatch_text_command(event, client, account_config, account_name, text_watch_rules, media_watch_rules)
+
+    @client.on(events.NewMessage(pattern='/unwatch_media'))
+    async def _handle_unwatch_media_command(event):
+        await handle_unwatch_media_command(event, client, account_config, account_name, text_watch_rules, media_watch_rules)
+    
     logger.info(f"Event handlers for account {account_name} are now active.")
 
 async def handle_message(event, client, account_config, account_name, db_account, text_watch_rules, media_watch_rules):
@@ -260,7 +268,71 @@ async def handle_message(event, client, account_config, account_name, db_account
         logger.debug(f"[DEBUG] Current text watch rules: {text_watch_rules}")
         logger.debug(f"[DEBUG] Current media watch rules: {media_watch_rules}")
 
-        # 处理媒体文件
+        # 处理媒体文件和转发逻辑分离，先判断转发
+        if event.message.media: # 再次检查是否有媒体，因为之前可能只是下载
+            if source_id in media_watch_rules:
+                rule = media_watch_rules[source_id]
+                target_id_media = rule['target_id']
+                media_type = rule.get('type')
+                should_forward = False
+                doc = getattr(event.message.media, 'document', None)
+                mime = doc.mime_type if doc and hasattr(doc, 'mime_type') else None
+                # --- 新增 sticker/gif 排除逻辑，与 batch_forward_media 保持一致 ---
+                is_sticker = False
+                if doc and mime:
+                    if mime in ('application/x-tgsticker', 'image/webp'):
+                        is_sticker = True
+                    if hasattr(doc, 'attributes'):
+                        for attr in doc.attributes:
+                            if attr.__class__.__name__ == 'DocumentAttributeSticker':
+                                is_sticker = True
+                # --- END ---
+                # --- 新增 gif 排除 ---
+                is_gif = (mime == 'image/gif')
+                # --- END ---
+                # --- 新增：更健壮的视频判断 ---
+                is_video = (mime and mime.startswith('video/')) or getattr(event.message, 'video', None) is not None
+                # --- END ---
+                if media_type == 'all':
+                    should_forward = True
+                elif media_type == 'all-txt':
+                    # 新增：所有消息（包括纯文字和所有媒体）
+                    should_forward = True
+                elif media_type in (None, '', 'media'):
+                    # 默认：常见媒体
+                    if event.message.photo or is_video or (mime and (mime.startswith('image/') or mime.startswith('audio/'))):
+                        should_forward = True
+                elif media_type == 'photo' or media_type == 'image':
+                    if event.message.photo or (mime and mime.startswith('image/')):
+                        should_forward = True
+                elif media_type == 'video':
+                    if is_video:
+                        should_forward = True
+                elif media_type == 'audio':
+                    if (mime and mime.startswith('audio/')):
+                        should_forward = True
+                elif media_type == 'document':
+                    if doc and not (mime and (mime.startswith('image/') or mime.startswith('video/') or mime.startswith('audio/'))):
+                        should_forward = True
+                elif media_type == 'text':
+                    if doc and mime and (mime == 'text/plain' or (doc.attributes and any(getattr(attr, 'file_name', '').endswith('.txt') for attr in doc.attributes))):
+                        should_forward = True
+                # 这里排除 sticker
+                if is_sticker:
+                    should_forward = False
+                # 这里排除 gif
+                if is_gif:
+                    should_forward = False
+                # --- 新增：未转发时详细日志 ---
+                if not should_forward:
+                    logger.warning(f"未转发媒体: id={event.message.id}, mime={mime}, is_sticker={is_sticker}, is_gif={is_gif}, is_video={is_video}, attributes={[attr.__class__.__name__ for attr in doc.attributes] if doc and hasattr(doc, 'attributes') else None}")
+                # --- END ---
+                if should_forward:
+                    logger.info(f"命中媒体规则: {source_id} -> {target_id_media} 类型: {media_type or 'media'} 转发媒体消息 {event.message.id}.")
+                    await safe_forward_message(event.message, target_id_media, client)
+                else:
+                    logger.debug(f"[DEBUG] Media rule hit but type not match: {media_type}, mime: {mime}")
+        # 处理媒体文件（下载），不影响转发
         if event.message.media:
             logger.debug(f"[DEBUG] Message contains media. Calling handle_media.")
             await handle_media(event.message, account_config)
@@ -275,49 +347,6 @@ async def handle_message(event, client, account_config, account_name, db_account
                     break # 命中一个规则后停止，避免重复转发
             if not text_processed:
                 logger.debug(f"[DEBUG] No text rule hit for chat_id={source_id}, text='{event.message.text[:50]}...'")
-        # 媒体监控
-        if event.message.media: # 再次检查是否有媒体，因为之前可能只是下载
-            if source_id in media_watch_rules:
-                rule = media_watch_rules[source_id]
-                target_id_media = rule['target_id']
-                media_type = rule.get('type')
-                should_forward = False
-                doc = getattr(event.message.media, 'document', None)
-                mime = doc.mime_type if doc and hasattr(doc, 'mime_type') else None
-                if media_type == 'all':
-                    should_forward = True
-                elif media_type == 'all-txt':
-                    # 新增：所有消息（包括纯文字和所有媒体）
-                    should_forward = True
-                elif media_type in (None, '', 'media'):
-                    # 默认：常见媒体
-                    if event.message.photo or (mime and (mime.startswith('image/') or mime.startswith('video/') or mime.startswith('audio/'))):
-                        should_forward = True
-                elif media_type == 'photo' or media_type == 'image':
-                    if event.message.photo or (mime and mime.startswith('image/')):
-                        should_forward = True
-                elif media_type == 'video':
-                    if (mime and mime.startswith('video/')):
-                        should_forward = True
-                elif media_type == 'audio':
-                    if (mime and mime.startswith('audio/')):
-                        should_forward = True
-                elif media_type == 'document':
-                    if doc and not (mime and (mime.startswith('image/') or mime.startswith('video/') or mime.startswith('audio/'))):
-                        should_forward = True
-                elif media_type == 'text':
-                    if doc and mime and (mime == 'text/plain' or (doc.attributes and any(getattr(attr, 'file_name', '').endswith('.txt') for attr in doc.attributes))):
-                        should_forward = True
-                # 这里排除 sticker
-                if is_sticker:
-                    should_forward = False
-                if should_forward:
-                    logger.info(f"命中媒体规则: {source_id} -> {target_id_media} 类型: {media_type or 'media'} 转发媒体消息 {event.message.id}.")
-                    await safe_forward_message(event.message, target_id_media, client)
-                else:
-                    logger.debug(f"[DEBUG] Media rule hit but type not match: {media_type}, mime: {mime}")
-            else:
-                logger.debug(f"[DEBUG] No media rule hit for chat_id={source_id}.")
     except Exception as e:
         logger.error(f"处理消息时发生未预期错误: {str(e)}", exc_info=True) # 打印完整堆栈
         # 注意：这里不能await event.respond，因为handle_message是通用监听，可能来自不应回复的群组
@@ -481,6 +510,50 @@ async def handle_watch_media_command(event, client, account_config, account_name
         logger.error(f"Error handling /watch_media command: {e}", exc_info=True)
         await event.respond(f"添加失败: {e}")
 
+async def handle_unwatch_text_command(event, client, account_config, account_name, text_watch_rules, media_watch_rules):
+    """命令格式: /unwatch_text 源chatid 关键词"""
+    logger.info(f"Received /unwatch_text command from {event.sender_id}: {event.text}")
+    if not event.is_private or not await check_admin(event, account_config):
+        return
+    try:
+        args = event.text.strip().split()
+        if len(args) != 3:
+            await event.respond("用法: /unwatch_text <源chatid> <关键词>")
+            return
+        source_id = str(args[1].strip().strip('_'))
+        keyword = args[2]
+        key = (source_id, keyword)
+        if key in text_watch_rules:
+            del text_watch_rules[key]
+            persist_rules(account_name, text_watch_rules, media_watch_rules)
+            await event.respond(f"已删除文字监控: 源: `{source_id}` 关键词: `{keyword}`", parse_mode='markdown')
+        else:
+            await event.respond(f"未找到对应的文字监控规则。", parse_mode='markdown')
+    except Exception as e:
+        logger.error(f"Error handling /unwatch_text command: {e}", exc_info=True)
+        await event.respond(f"删除失败: {e}")
+
+async def handle_unwatch_media_command(event, client, account_config, account_name, text_watch_rules, media_watch_rules):
+    """命令格式: /unwatch_media 源chatid"""
+    logger.info(f"Received /unwatch_media command from {event.sender_id}: {event.text}")
+    if not event.is_private or not await check_admin(event, account_config):
+        return
+    try:
+        args = event.text.strip().split()
+        if len(args) != 2:
+            await event.respond("用法: /unwatch_media <源chatid>")
+            return
+        source_id = str(args[1].strip().strip('_'))
+        if source_id in media_watch_rules:
+            del media_watch_rules[source_id]
+            persist_rules(account_name, text_watch_rules, media_watch_rules)
+            await event.respond(f"已删除媒体监控: 源: `{source_id}`", parse_mode='markdown')
+        else:
+            await event.respond(f"未找到对应的媒体监控规则。", parse_mode='markdown')
+    except Exception as e:
+        logger.error(f"Error handling /unwatch_media command: {e}", exc_info=True)
+        await event.respond(f"删除失败: {e}")
+
 async def handle_batch_forward_command(event, client, account_config, account_name, db_account, text_watch_rules, media_watch_rules):
     """命令格式: /batch_forward 源chatid 目标chatid 数量 [跳过数量] [type]"""
     logger.info(f"Received /batch_forward command from {event.sender_id}: {event.text}")
@@ -545,6 +618,8 @@ async def batch_forward_media(source_chat_id, target_chat_id, limit=50, offset=0
                     for attr in doc.attributes:
                         if attr.__class__.__name__ == 'DocumentAttributeSticker':
                             is_sticker = True
+            # 新增：排除 gif
+            is_gif = (mime == 'image/gif')
             should_forward = False
             if media_type == 'all-txt':
                 should_forward = True

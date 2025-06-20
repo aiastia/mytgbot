@@ -10,3 +10,4 @@ user_tokens/*.json
 docker_mpt/config.yaml
 docker_mpt/downloads/*
 docker_mpt/*.session-journal
+docker_mpt/data/account1/*
