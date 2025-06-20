@@ -2,18 +2,13 @@ import os
 import yaml
 import logging
 from telethon import TelegramClient, events
-from telethon.sessions import StringSession
 from telethon.tl.types import MessageMediaDocument, MessageMediaPhoto, MessageMediaWebPage
 from db.base import init_db
-from db.models import Message, Keyword, ForwardRule, Account
-from sqlalchemy.orm import Session
+from db.models import Message, Account
 from db.base import SessionLocal
-import re
 import asyncio
 from telethon.errors import SessionPasswordNeededError
-from datetime import datetime, timedelta
-import time
-from sqlalchemy.exc import IntegrityError
+from datetime import datetime
 from sqlalchemy.sql import select
 
 # Configure logging
