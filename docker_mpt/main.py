@@ -648,6 +648,7 @@ async def batch_forward_media(source_chat_id, target_chat_id, limit=50, offset=0
                     logger.info(f"Forwarding message {message.id} (type: {media_type or 'photo+video'}) from {source_chat_id} to {target_chat_id}")
                     await message.forward_to(target_chat_id)
                     count += 1
+                    last_message_id = message.id  # 记录最后一条成功转发的消息ID
                     logger.info(f"Successfully forwarded message {message.id}. Total forwarded: {count}/{limit}")
                     await asyncio.sleep(2)
                 except Exception as e:
@@ -662,7 +663,7 @@ async def batch_forward_media(source_chat_id, target_chat_id, limit=50, offset=0
     except Exception as e:
         logger.error(f"Error during batch media forwarding: {e}", exc_info=True)
         raise # 重新抛出异常，让调用者处理
-    return count, last_message_id  # 新增
+    return count, last_message_id  # 返回最后一条成功转发的消息ID
 
 async def handle_help_command(event, client, account_config, account_name):
     """显示所有命令及用途"""
