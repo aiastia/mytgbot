@@ -72,7 +72,11 @@ class BotAccount:
             self.text_watch_rules[(str(rule['source_id']), rule['keyword'])] = str(rule['target_id'])
         media_rules = self.config.get('media_watch_rules', [])
         for rule in media_rules:
-            self.media_watch_rules[str(rule['source_id'])] = str(rule['target_id'])
+            # 兼容老格式
+            if isinstance(rule, dict):
+                self.media_watch_rules[str(rule['source_id'])] = {'target_id': str(rule['target_id']), 'type': rule.get('type')}
+            else:
+                self.media_watch_rules[str(rule['source_id'])] = {'target_id': str(rule), 'type': None}
 
     def persist_rules(self):
         # 写入 config.yaml
@@ -84,24 +88,21 @@ class BotAccount:
             found = False
             for acc in full_config['accounts']:
                 if acc['name'] == self.name:
-                    # text_watch_rules
                     acc['text_watch_rules'] = [
-                        {'source_id': sid, 'keyword': keyword, 'target_id': tid} # 保持为字符串写入
+                        {'source_id': sid, 'keyword': keyword, 'target_id': tid}
                         for (sid, keyword), tid in self.text_watch_rules.items()
                     ]
-                    # media_watch_rules
                     acc['media_watch_rules'] = [
-                        {'source_id': sid, 'target_id': tid} # 保持为字符串写入
-                        for sid, tid in self.media_watch_rules.items()
+                        {'source_id': sid, 'target_id': v['target_id'], 'type': v['type']} if isinstance(v, dict) else {'source_id': sid, 'target_id': v, 'type': None}
+                        for sid, v in self.media_watch_rules.items()
                     ]
                     found = True
                     break
             if not found:
                 self.logger.warning(f"Could not find account '{self.name}' in config.yaml to persist rules.")
-                return # 如果没找到当前账号，则不写入
-            
+                return
             with open(config_path, 'w', encoding='utf-8') as f:
-                yaml.dump(full_config, f, allow_unicode=True, indent=2) # 增加 indent 提高可读性
+                yaml.dump(full_config, f, allow_unicode=True, indent=2)
             self.logger.info(f"Rules for account {self.name} persisted to config.yaml.")
         except Exception as e:
             self.logger.error(f"Error persisting rules for account {self.name}: {e}")
@@ -252,6 +253,10 @@ class BotAccount:
         async def _handle_config_command(event):
             await self.handle_config_command(event)
         
+        @self.client.on(events.NewMessage(pattern='/msginfo'))
+        async def _handle_msginfo_command(event):
+            await self.handle_msginfo_command(event)
+        
         self.logger.info(f"Event handlers for account {self.name} are now active.")
 
     async def check_admin(self, event):
@@ -388,9 +393,41 @@ class BotAccount:
             # 媒体监控
             if event.message.media: # 再次检查是否有媒体，因为之前可能只是下载
                 if source_id in self.media_watch_rules:
-                    target_id_media = self.media_watch_rules[source_id]
-                    self.logger.info(f"命中媒体规则: {source_id} -> {target_id_media}. 转发媒体消息 {event.message.id}.")
-                    await self.safe_forward_message(event.message, target_id_media)
+                    rule = self.media_watch_rules[source_id]
+                    target_id_media = rule['target_id']
+                    media_type = rule.get('type')
+                    should_forward = False
+                    doc = getattr(event.message.media, 'document', None)
+                    mime = doc.mime_type if doc and hasattr(doc, 'mime_type') else None
+                    if media_type == 'all':
+                        should_forward = True
+                    elif media_type == 'all-txt':
+                        # 新增：所有消息（包括纯文字和所有媒体）
+                        should_forward = True
+                    elif media_type in (None, '', 'media'):
+                        # 默认：常见媒体
+                        if event.message.photo or (mime and (mime.startswith('image/') or mime.startswith('video/') or mime.startswith('audio/'))):
+                            should_forward = True
+                    elif media_type == 'photo' or media_type == 'image':
+                        if event.message.photo or (mime and mime.startswith('image/')):
+                            should_forward = True
+                    elif media_type == 'video':
+                        if (mime and mime.startswith('video/')):
+                            should_forward = True
+                    elif media_type == 'audio':
+                        if (mime and mime.startswith('audio/')):
+                            should_forward = True
+                    elif media_type == 'document':
+                        if doc and not (mime and (mime.startswith('image/') or mime.startswith('video/') or mime.startswith('audio/'))):
+                            should_forward = True
+                    elif media_type == 'text':
+                        if doc and mime and (mime == 'text/plain' or (doc.attributes and any(getattr(attr, 'file_name', '').endswith('.txt') for attr in doc.attributes))):
+                            should_forward = True
+                    if should_forward:
+                        self.logger.info(f"命中媒体规则: {source_id} -> {target_id_media} 类型: {media_type or 'media'} 转发媒体消息 {event.message.id}.")
+                        await self.safe_forward_message(event.message, target_id_media)
+                    else:
+                        self.logger.debug(f"[DEBUG] Media rule hit but type not match: {media_type}, mime: {mime}")
                 else:
                     self.logger.debug(f"[DEBUG] No media rule hit for chat_id={source_id}.")
 
@@ -414,29 +451,83 @@ class BotAccount:
             self.logger.debug(f"Download path base: {download_path_base}")
 
             file_name = None
+            ext = None
+            mime = None
             if message.media:
-                if isinstance(message.media, MessageMediaDocument) and message.media.document.attributes:
-                    # 尝试从 attributes 获取文件名
-                    for attr in message.media.document.attributes:
+                if isinstance(message.media, MessageMediaDocument) and message.media.document:
+                    doc = message.media.document
+                    # 优先从 attributes 获取文件名
+                    for attr in doc.attributes:
                         if hasattr(attr, 'file_name') and attr.file_name:
                             file_name = attr.file_name
                             break
+                    mime = getattr(doc, 'mime_type', None)
+                    self.logger.debug(f"Media is document, original file_name: {file_name}, mime_type: {mime}")
+                    # 如果没有 file_name，尝试用 mime_type 推断扩展名
                     if not file_name:
-                        file_name = f"document_{message.id}.file" # Fallback for documents
-                    self.logger.debug(f"Media is document, original file_name: {file_name}")
+                        ext = None
+                        if mime:
+                            if mime.startswith('image/'):
+                                ext = '.' + mime.split('/')[-1]
+                            elif mime.startswith('video/'):
+                                ext = '.' + mime.split('/')[-1]
+                            elif mime.startswith('audio/'):
+                                ext = '.' + mime.split('/')[-1]
+                            elif mime == 'application/pdf':
+                                ext = '.pdf'
+                            elif mime == 'text/plain':
+                                ext = '.txt'
+                        file_name = f"document_{message.id}{ext or '.file'}"
+                    else:
+                        # 如果 file_name 没有扩展名但 mime_type 有，补全扩展名
+                        if '.' not in file_name and mime:
+                            if mime.startswith('image/'):
+                                file_name += '.' + mime.split('/')[-1]
+                            elif mime.startswith('video/'):
+                                file_name += '.' + mime.split('/')[-1]
+                            elif mime.startswith('audio/'):
+                                file_name += '.' + mime.split('/')[-1]
+                            elif mime == 'application/pdf':
+                                file_name += '.pdf'
+                            elif mime == 'text/plain':
+                                file_name += '.txt'
                 elif isinstance(message.media, MessageMediaPhoto):
                     file_name = f"photo_{message.id}.jpg"
                     self.logger.debug(f"Media is photo, generated file_name: {file_name}")
                 elif isinstance(message.media, MessageMediaWebPage) and message.media.webpage.document:
-                    # 对于网页中的媒体，可能需要进一步解析
-                    if message.media.webpage.document.attributes:
-                        for attr in message.media.webpage.document.attributes:
-                            if hasattr(attr, 'file_name') and attr.file_name:
-                                file_name = attr.file_name
-                                break
+                    doc = message.media.webpage.document
+                    for attr in doc.attributes:
+                        if hasattr(attr, 'file_name') and attr.file_name:
+                            file_name = attr.file_name
+                            break
+                    mime = getattr(doc, 'mime_type', None)
                     if not file_name:
-                        file_name = f"webmedia_{message.id}.file"
-                    self.logger.debug(f"Media is webpage document, generated file_name: {file_name}")
+                        ext = None
+                        if mime:
+                            if mime.startswith('image/'):
+                                ext = '.' + mime.split('/')[-1]
+                            elif mime.startswith('video/'):
+                                ext = '.' + mime.split('/')[-1]
+                            elif mime.startswith('audio/'):
+                                ext = '.' + mime.split('/')[-1]
+                            elif mime == 'application/pdf':
+                                ext = '.pdf'
+                            elif mime == 'text/plain':
+                                ext = '.txt'
+                        file_name = f"webmedia_{message.id}{ext or '.file'}"
+                    else:
+                        if '.' not in file_name and mime:
+                            if mime.startswith('image/'):
+                                file_name += '.' + mime.split('/')[-1]
+                            elif mime.startswith('video/'):
+                                file_name += '.' + mime.split('/')[-1]
+                            elif mime.startswith('audio/'):
+                                file_name += '.' + mime.split('/')[-1]
+                            elif mime == 'application/pdf':
+                                file_name += '.pdf'
+                            elif mime == 'text/plain':
+                                file_name += '.txt'
+                    self.logger.debug(f"Media is webpage document, generated file_name: {file_name}, mime_type: {mime}")
                 else:
                     file_name = f"media_{message.id}.unknown" # 通用回退
                     self.logger.debug(f"Media is unknown type, generated file_name: {file_name}")
@@ -460,7 +551,6 @@ class BotAccount:
             else:
                 self.logger.debug(f"No media found in message {message.id}.")
 
-
         except Exception as e:
             logger.error(f"处理媒体文件时出错: {str(e)}", exc_info=True)
 
@@ -474,8 +564,8 @@ class BotAccount:
             if len(args) != 4:
                 await event.respond("用法: /watch_text <源chatid> <目标chatid> <关键词>")
                 return
-            source_id = str(args[1].strip())
-            target_id = str(args[2].strip())
+            source_id = str(args[1].strip().strip('_'))
+            target_id = str(args[2].strip().strip('_'))
             keyword = args[3]
             self.text_watch_rules[(source_id, keyword)] = target_id
             self.persist_rules()
@@ -485,42 +575,44 @@ class BotAccount:
             await event.respond(f"添加失败: {e}")
 
     async def handle_watch_media_command(self, event):
-        """命令格式: /watch_media 源chatid 目标chatid"""
+        """命令格式: /watch_media 源chatid 目标chatid [type]"""
         self.logger.info(f"Received /watch_media command from {event.sender_id}: {event.text}")
         if not event.is_private or not await self.check_admin(event):
             return
         try:
             args = event.text.strip().split()
-            if len(args) != 3:
-                await event.respond("用法: /watch_media <源chatid> <目标chatid>")
+            if len(args) < 3:
+                await event.respond("用法: /watch_media <源chatid> <目标chatid> [type] (type 可选: all, photo, video, image, document, audio, text)")
                 return
-            source_id = str(args[1].strip())
-            target_id = str(args[2].strip())
-            self.media_watch_rules[source_id] = target_id
+            source_id = str(args[1].strip().strip('_'))
+            target_id = str(args[2].strip().strip('_'))
+            media_type = args[3].lower() if len(args) > 3 else None
+            # 存储为 dict，支持类型
+            self.media_watch_rules[source_id] = {'target_id': target_id, 'type': media_type}
             self.persist_rules()
-            await event.respond(f"已添加媒体监控: 源: `{source_id}` -> 目标: `{target_id}`", parse_mode='markdown')
+            await event.respond(f"已添加媒体监控: 源: `{source_id}` -> 目标: `{target_id}` 类型: `{media_type or 'media'}`", parse_mode='markdown')
         except Exception as e:
             self.logger.error(f"Error handling /watch_media command: {e}", exc_info=True)
             await event.respond(f"添加失败: {e}")
 
     async def handle_batch_forward_command(self, event):
-        """命令格式: /batch_forward 源chatid 目标chatid 数量 [跳过数量]"""
+        """命令格式: /batch_forward 源chatid 目标chatid 数量 [跳过数量] [type]"""
         self.logger.info(f"Received /batch_forward command from {event.sender_id}: {event.text}")
         if not event.is_private or not await self.check_admin(event):
             return
         try:
             args = event.text.strip().split()
             if len(args) < 4:
-                await event.respond("用法: /batch_forward <源chatid> <目标chatid> <数量> [跳过数量]")
+                await event.respond("用法: /batch_forward <源chatid> <目标chatid> <数量> [跳过数量] [type] (type 可选: all, photo, video, image, document, audio, text)")
                 return
-            
             source_chat_id = int(args[1])
             target_chat_id = int(args[2])
             limit = int(args[3])
-            offset = int(args[4]) if len(args) > 4 else 0
+            offset = int(args[4]) if len(args) > 4 and args[4].isdigit() else 0
+            media_type = args[5].lower() if len(args) > 5 else None
 
-            await event.respond(f"开始批量转发图片和视频...\n源: `{source_chat_id}`\n目标: `{target_chat_id}`\n数量: `{limit}`\n跳过: `{offset}`", parse_mode='markdown')
-            await self.batch_forward_media(source_chat_id, target_chat_id, limit, offset)
+            await event.respond(f"开始批量转发...\n源: `{source_chat_id}`\n目标: `{target_chat_id}`\n数量: `{limit}`\n跳过: `{offset}`\n类型: `{media_type or 'photo+video'}`", parse_mode='markdown')
+            await self.batch_forward_media(source_chat_id, target_chat_id, limit, offset, media_type)
             await event.respond("批量转发完成！")
         except ValueError:
             await event.respond("参数错误：chatid、数量和跳过数量必须是数字。")
@@ -528,43 +620,68 @@ class BotAccount:
             self.logger.error(f"Error handling /batch_forward command: {e}", exc_info=True)
             await event.respond(f"批量转发出错: {e}")
 
-    async def batch_forward_media(self, source_chat_id, target_chat_id, limit=50, offset=0):
+    async def batch_forward_media(self, source_chat_id, target_chat_id, limit=50, offset=0, media_type=None):
         """
-        批量转发历史图片和视频消息，支持 offset 跳过前N条
+        批量转发历史消息，支持 type 参数
         :param source_chat_id: 源群组/频道ID
         :param target_chat_id: 目标群组/频道ID
         :param limit: 获取的历史消息数量
         :param offset: 跳过前 offset 条
+        :param media_type: 支持 all, all-txt, photo, video, image, document, audio, text
         """
-        self.logger.info(f"Starting batch media forward from {source_chat_id} to {target_chat_id}, limit={limit}, offset={offset}")
+        self.logger.info(f"Starting batch media forward from {source_chat_id} to {target_chat_id}, limit={limit}, offset={offset}, type={media_type}")
         count = 0
         try:
-            # Telethon的 iter_messages 通常是从最新消息开始迭代，reverse=True 会让它从最旧的开始。
-            # offset_id=0 和 reverse=True 是为了从头开始遍历历史消息。
-            # 跳过逻辑应该在迭代器内部处理。
             async for message in self.client.iter_messages(source_chat_id, offset_id=0, reverse=True):
                 if offset > 0:
                     self.logger.debug(f"Skipping message {message.id} (offset remaining: {offset})")
                     offset -= 1
                     continue
-                
-                # 检查消息是否包含图片或视频
-                if message.photo or (message.media and hasattr(message.media, 'document') and message.media.document.mime_type and ('video' in message.media.document.mime_type)):
+                doc = getattr(message.media, 'document', None)
+                mime = doc.mime_type if doc and hasattr(doc, 'mime_type') else None
+                is_photo = message.photo is not None
+                is_video = mime and mime.startswith('video/')
+                is_image = is_photo or (mime and mime.startswith('image/'))
+                is_audio = mime and mime.startswith('audio/')
+                is_document = doc and not (is_image or is_video or is_audio)
+                is_text = doc and (mime == 'text/plain' or (doc and doc.attributes and any(getattr(attr, 'file_name', '').endswith('.txt') for attr in doc.attributes)))
+                # 新增网页预览类型判断
+                is_webpage = message.media is not None and isinstance(message.media, MessageMediaWebPage)
+                should_forward = False
+                if media_type == 'all-txt':
+                    # 所有消息都转发（包括纯文字、所有媒体、网页预览）
+                    should_forward = True
+                elif media_type == 'all':
+                    # 只转发有媒体的消息，且排除网页预览
+                    should_forward = message.media is not None and not is_webpage
+                elif media_type in (None, '', 'media'):
+                    should_forward = is_image or is_video
+                elif media_type in ('photo', 'image'):
+                    should_forward = is_image
+                elif media_type == 'video':
+                    should_forward = is_video
+                elif media_type == 'audio':
+                    should_forward = is_audio
+                elif media_type == 'document':
+                    should_forward = is_document
+                elif media_type == 'text':
+                    should_forward = is_text
+                if should_forward:
                     try:
-                        self.logger.info(f"Forwarding message {message.id} (type: photo/video) from {source_chat_id} to {target_chat_id}")
+                        self.logger.info(f"Forwarding message {message.id} (type: {media_type or 'photo+video'}) from {source_chat_id} to {target_chat_id}")
                         await message.forward_to(target_chat_id)
                         count += 1
                         self.logger.info(f"Successfully forwarded message {message.id}. Total forwarded: {count}/{limit}")
-                        await asyncio.sleep(1) # 增加延迟，避免触发Telegram限速
+                        await asyncio.sleep(2)
                     except Exception as e:
-                        self.logger.error(f"转发消息 {message.id} 失败: {e}", exc_info=True)
+                        preview = (message.text or message.caption or '').replace('\n', ' ')[:60]
+                        media_info = f"photo={is_photo}, video={is_video}, image={is_image}, audio={is_audio}, document={is_document}, text={is_text}, mime={mime}, webpage={is_webpage}"
+                        self.logger.error(f"转发消息失败 | id={message.id} | 预览='{preview}' | 媒体: {media_info} | 错误类型: {type(e).__name__} | 详情: {e}", exc_info=True)
                 else:
-                    self.logger.debug(f"Message {message.id} from {source_chat_id} is not a photo or video, skipping.")
-
+                    self.logger.debug(f"Message {message.id} from {source_chat_id} is not type {media_type or 'photo+video'}, skipping.")
                 if count >= limit:
                     self.logger.info(f"Reached forwarding limit ({limit}). Stopping batch forward.")
-                    break # 达到数量限制，停止
-
+                    break
         except Exception as e:
             self.logger.error(f"Error during batch media forwarding: {e}", exc_info=True)
             raise # 重新抛出异常，让调用者处理
@@ -578,7 +695,7 @@ class BotAccount:
             "可用命令列表：\n"
             "/help - 显示本帮助信息\n"
             "/watch_text <源chatid> <目标chatid> <关键词> - 文字监控转发（*为全部）\n"
-            "/watch_media <源chatid> <目标chatid> - 媒体监控转发\n"
+            "/watch_media <源chatid> <目标chatid> [type] - 媒体监控转发，type 可选：all, photo, video, image, document, audio, text，all 表示所有文件，默认仅常见媒体\n"
             "/batch_forward <源chatid> <目标chatid> <数量> [跳过数量] - 批量转发历史图片和视频\n"
             "/status - 查看当前账号状态和监控规则\n"
             "/config - 查看和设置配置项（例如：/config show, /config set auto_download true）\n"
@@ -713,8 +830,9 @@ class BotAccount:
                         for (sid, keyword), tid in self.text_watch_rules.items()
                     ]
                     full_config['accounts'][i]['media_watch_rules'] = [
-                        {'source_id': sid, 'target_id': tid}
-                        for sid, tid in self.media_watch_rules.items()
+                        {'source_id': sid, 'target_id': v['target_id'], 'type': v.get('type')}
+                        if isinstance(v, dict) else {'source_id': sid, 'target_id': v, 'type': None}
+                        for sid, v in self.media_watch_rules.items()
                     ]
                     found = True
                     break
@@ -728,6 +846,34 @@ class BotAccount:
             self.logger.info(f"General config changes for account {self.name} persisted to config.yaml.")
         except Exception as e:
             self.logger.error(f"Error persisting general config changes for account {self.name}: {e}", exc_info=True)
+
+    async def handle_msginfo_command(self, event):
+        """处理 /msginfo 命令，显示被回复消息的详细信息"""
+        self.logger.info(f"Received /msginfo command from {event.sender_id}")
+        if not event.is_private or not await self.check_admin(event):
+            return
+        try:
+            # 必须是回复消息
+            if not event.is_reply:
+                await event.respond("请在回复一条消息的情况下使用 /msginfo。")
+                return
+            reply_msg = await event.get_reply_message()
+            if not reply_msg:
+                await event.respond("未能获取被回复的消息。")
+                return
+            info = (
+                f"**消息详细信息：**\n"
+                f"chat_id: `{reply_msg.chat_id}`\n"
+                f"message_id: `{reply_msg.id}`\n"
+                f"from_id: `{getattr(reply_msg, 'from_id', None)}`\n"
+                f"sender_username: `{getattr(reply_msg.sender, 'username', None)}`\n"
+                f"chat_title: `{getattr(reply_msg.chat, 'title', None)}`\n"
+                f"内容: `{(reply_msg.text or reply_msg.message or reply_msg.raw_text or '')[:100]}`"
+            )
+            await event.respond(info, parse_mode='markdown')
+        except Exception as e:
+            self.logger.error(f"Error in handle_msginfo_command: {e}", exc_info=True)
+            await event.respond(f"获取消息信息失败: {e}")
 
 
 async def main():
