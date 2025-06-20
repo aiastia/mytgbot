@@ -7,3 +7,4 @@ token.txt
 user_tokens/*.json
 *.session
 *.txt
+docker_mpt/config.yaml
