@@ -11,6 +11,8 @@ from telethon.errors import SessionPasswordNeededError
 from datetime import datetime
 from sqlalchemy.sql import select
 import re
+from collections import defaultdict
+import time
 
 # Configure logging
 logging.basicConfig(
@@ -195,6 +197,10 @@ def setup_handlers(client, account_config, account_name, db_account, text_watch_
     
     logger.info(f"Event handlers for account {account_name} are now active.")
 
+# ========== 频率限制：每 chat_id 每秒最多转发一次 ==========
+# 记录上次转发时间，key=(source_id, target_id)
+last_forward_time = defaultdict(lambda: 0)
+
 async def handle_message(event, client, account_config, account_name, db_account, text_watch_rules, media_watch_rules):
     """处理新消息，支持群组、频道和私聊"""
     logger.debug(f"[DEBUG] handle_message triggered for chat_id: {event.chat_id}, message_id: {event.message.id}")
@@ -329,6 +335,14 @@ async def handle_message(event, client, account_config, account_name, db_account
                     logger.warning(f"未转发媒体: id={event.message.id}, mime={mime}, is_sticker={is_sticker}, is_gif={is_gif}, is_video={is_video}, attributes={[attr.__class__.__name__ for attr in doc.attributes] if doc and hasattr(doc, 'attributes') else None}")
                 # --- END ---
                 if should_forward:
+                    # ====== 频率限制：如不足1秒则延迟发送 ======
+                    now = time.time()
+                    key = (source_id, str(target_id_media))
+                    wait_time = 1.0 - (now - last_forward_time[key])
+                    if wait_time > 0:
+                        logger.info(f"频率限制：{key} 距上次转发不足1秒，延迟 {wait_time:.2f} 秒后发送。")
+                        await asyncio.sleep(wait_time)
+                    last_forward_time[key] = time.time()
                     logger.info(f"命中媒体规则: {source_id} -> {target_id_media} 类型: {media_type or 'media'} 转发媒体消息 {event.message.id}.")
                     await safe_forward_message(event.message, target_id_media, client)
                 else:
@@ -341,7 +355,15 @@ async def handle_message(event, client, account_config, account_name, db_account
         if event.message.text:
             text_processed = False
             for (sid, keyword), target_id in text_watch_rules.items():
-                if sid == source_id and (keyword == '*' or keyword in event.message.text): # source_id 已经是字符串
+                if sid == source_id and (keyword == '*' or keyword in event.message.text):
+                    # ====== 频率限制：如不足1秒则延迟发送 ======
+                    now = time.time()
+                    key = (source_id, str(target_id))
+                    wait_time = 1.0 - (now - last_forward_time[key])
+                    if wait_time > 0:
+                        logger.info(f"频率限制：{key} 距上次转发不足1秒，延迟 {wait_time:.2f} 秒后发送。")
+                        await asyncio.sleep(wait_time)
+                    last_forward_time[key] = time.time()
                     logger.info(f"命中文字规则: ({sid}, '{keyword}') -> {target_id}. 转发消息: '{event.message.text[:50]}...'")
                     await safe_forward_message(event.message, target_id, client)
                     text_processed = True
@@ -793,9 +815,10 @@ async def handle_config_command(event, client, account_config, account_name, tex
         await event.respond(f"处理命令时出错: {str(e)}")
 
 async def handle_msginfo_command(event, client, account_config, account_name):
-    """处理 /msginfo 命令，显示被回复消息的详细信息"""
+    """处理 /msginfo 命令，显示被回复消息的详细信息，支持群组/频道/私聊"""
     logger.info(f"Received /msginfo command from {event.sender_id}")
-    if not event.is_private or not await check_admin(event, account_config):
+    # 只允许管理员使用，无论私聊还是群组/频道
+    if not await check_admin(event, account_config):
         return
     try:
         # 必须是回复消息
@@ -813,7 +836,7 @@ async def handle_msginfo_command(event, client, account_config, account_name):
             f"from_id: `{getattr(reply_msg, 'from_id', None)}`\n"
             f"sender_username: `{getattr(reply_msg.sender, 'username', None)}`\n"
             f"chat_title: `{getattr(reply_msg.chat, 'title', None)}`\n"
-            f"内容: `{(reply_msg.text or reply_msg.message or reply_msg.raw_text or '')[:100]}`"
+            f"内容: `{(reply_msg.text or getattr(reply_msg, 'message', None) or getattr(reply_msg, 'raw_text', None) or '')[:100]}`"
         )
         await event.respond(info, parse_mode='markdown')
     except Exception as e:
