@@ -10,6 +10,7 @@ import asyncio
 from telethon.errors import SessionPasswordNeededError
 from datetime import datetime
 from sqlalchemy.sql import select
+import re
 
 # Configure logging
 logging.basicConfig(
@@ -479,8 +480,8 @@ async def handle_watch_text_command(event, client, account_config, account_name,
         if len(args) != 4:
             await event.respond("用法: /watch_text <源chatid> <目标chatid> <关键词>")
             return
-        source_id = str(args[1].strip().strip('_'))
-        target_id = str(args[2].strip().strip('_'))
+        source_id = str(args[1].strip())  # 只 strip 空格
+        target_id = str(args[2].strip())
         keyword = args[3]
         text_watch_rules[(source_id, keyword)] = target_id
         persist_rules(account_name, text_watch_rules, media_watch_rules)
@@ -499,8 +500,9 @@ async def handle_watch_media_command(event, client, account_config, account_name
         if len(args) < 3:
             await event.respond("用法: /watch_media <源chatid> <目标chatid> [type] (type 可选: all, photo, video, image, document, audio, text)")
             return
-        source_id = str(args[1].strip().strip('_'))
-        target_id = str(args[2].strip().strip('_'))
+        # 只允许 - 和数字，去除其它字符
+        source_id = re.sub(r'[^-\d]', '', args[1].strip())
+        target_id = re.sub(r'[^-\d]', '', args[2].strip())
         media_type = args[3].lower() if len(args) > 3 else None
         # 存储为 dict，支持类型
         media_watch_rules[source_id] = {'target_id': target_id, 'type': media_type}
@@ -520,7 +522,7 @@ async def handle_unwatch_text_command(event, client, account_config, account_nam
         if len(args) != 3:
             await event.respond("用法: /unwatch_text <源chatid> <关键词>")
             return
-        source_id = str(args[1].strip().strip('_'))
+        source_id = str(args[1].strip())  # 只 strip 空格
         keyword = args[2]
         key = (source_id, keyword)
         if key in text_watch_rules:
@@ -543,7 +545,7 @@ async def handle_unwatch_media_command(event, client, account_config, account_na
         if len(args) != 2:
             await event.respond("用法: /unwatch_media <源chatid>")
             return
-        source_id = str(args[1].strip().strip('_'))
+        source_id = str(args[1].strip())  # 只 strip 空格
         if source_id in media_watch_rules:
             del media_watch_rules[source_id]
             persist_rules(account_name, text_watch_rules, media_watch_rules)
