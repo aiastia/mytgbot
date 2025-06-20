@@ -498,8 +498,10 @@ async def handle_batch_forward_command(event, client, account_config, account_na
         media_type = args[5].lower() if len(args) > 5 else None
 
         await event.respond(f"开始批量转发...\n源: `{source_chat_id}`\n目标: `{target_chat_id}`\n数量: `{limit}`\n跳过: `{offset}`\n类型: `{media_type or 'photo+video'}`", parse_mode='markdown')
-        await batch_forward_media(source_chat_id, target_chat_id, limit, offset, media_type, client)
-        await event.respond("批量转发完成！")
+        #await batch_forward_media(source_chat_id, target_chat_id, limit, offset, media_type, client)
+        #await event.respond("批量转发完成！")
+        sent_count, last_id = await batch_forward_media(source_chat_id, target_chat_id, limit, offset, media_type, client)
+        await event.respond(f"批量转发完成！共发送 {sent_count} 条，最后一条源消息ID是 {last_id}。\n下次可用 offset={offset+sent_count} 跳过。")
     except ValueError:
         await event.respond("参数错误：chatid、数量和跳过数量必须是数字。")
     except Exception as e:
@@ -517,6 +519,7 @@ async def batch_forward_media(source_chat_id, target_chat_id, limit=50, offset=0
     """
     logger.info(f"Starting batch media forward from {source_chat_id} to {target_chat_id}, limit={limit}, offset={offset}, type={media_type}")
     count = 0
+    last_message_id = None  # 新增
     try:
         async for message in client.iter_messages(source_chat_id, offset_id=0, reverse=True):
             if offset > 0:
@@ -584,6 +587,7 @@ async def batch_forward_media(source_chat_id, target_chat_id, limit=50, offset=0
     except Exception as e:
         logger.error(f"Error during batch media forwarding: {e}", exc_info=True)
         raise # 重新抛出异常，让调用者处理
+    return count, last_message_id  # 新增
 
 async def handle_help_command(event, client, account_config, account_name):
     """显示所有命令及用途"""
