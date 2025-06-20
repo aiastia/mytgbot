@@ -562,6 +562,9 @@ async def batch_forward_media(source_chat_id, target_chat_id, limit=50, offset=0
             # 这里排除 sticker
             if is_sticker:
                 should_forward = False
+            # 新增：排除 gif
+            if mime == 'image/gif':
+                should_forward = False
             if should_forward:
                 try:
                     logger.info(f"Forwarding message {message.id} (type: {media_type or 'photo+video'}) from {source_chat_id} to {target_chat_id}")
