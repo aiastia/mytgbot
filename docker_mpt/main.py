@@ -245,7 +245,7 @@ async def handle_message(event, client, account_config, account_name, db_account
             chat_title=event.chat.title if hasattr(event.chat, 'title') and event.chat.title else "Chat",
             sender_id=event.message.sender_id,
             sender_username=getattr(event.message.sender, 'username', None),
-            content=event.message.text or event.message.caption or "",
+            content=event.message.text or "",
             timestamp=datetime.now(),
             is_bot=getattr(event.message.sender, 'bot', False),
             is_forwarded=event.message.forward is not None
@@ -308,6 +308,9 @@ async def handle_message(event, client, account_config, account_name, db_account
                 elif media_type == 'text':
                     if doc and mime and (mime == 'text/plain' or (doc.attributes and any(getattr(attr, 'file_name', '').endswith('.txt') for attr in doc.attributes))):
                         should_forward = True
+                # 这里排除 sticker
+                if is_sticker:
+                    should_forward = False
                 if should_forward:
                     logger.info(f"命中媒体规则: {source_id} -> {target_id_media} 类型: {media_type or 'media'} 转发媒体消息 {event.message.id}.")
                     await safe_forward_message(event.message, target_id_media, client)
@@ -530,12 +533,19 @@ async def batch_forward_media(source_chat_id, target_chat_id, limit=50, offset=0
             is_text = doc and (mime == 'text/plain' or (doc and doc.attributes and any(getattr(attr, 'file_name', '').endswith('.txt') for attr in doc.attributes)))
             # 新增网页预览类型判断
             is_webpage = message.media is not None and isinstance(message.media, MessageMediaWebPage)
+            # 新增：排除 sticker
+            is_sticker = False
+            if doc and mime:
+                if mime in ('application/x-tgsticker', 'image/webp'):
+                    is_sticker = True
+                if hasattr(doc, 'attributes'):
+                    for attr in doc.attributes:
+                        if attr.__class__.__name__ == 'DocumentAttributeSticker':
+                            is_sticker = True
             should_forward = False
             if media_type == 'all-txt':
-                # 所有消息都转发（包括纯文字、所有媒体、网页预览）
                 should_forward = True
             elif media_type == 'all':
-                # 只转发有媒体的消息，且排除网页预览
                 should_forward = message.media is not None and not is_webpage
             elif media_type in (None, '', 'media'):
                 should_forward = is_image or is_video
@@ -549,6 +559,9 @@ async def batch_forward_media(source_chat_id, target_chat_id, limit=50, offset=0
                 should_forward = is_document
             elif media_type == 'text':
                 should_forward = is_text
+            # 这里排除 sticker
+            if is_sticker:
+                should_forward = False
             if should_forward:
                 try:
                     logger.info(f"Forwarding message {message.id} (type: {media_type or 'photo+video'}) from {source_chat_id} to {target_chat_id}")
@@ -557,7 +570,7 @@ async def batch_forward_media(source_chat_id, target_chat_id, limit=50, offset=0
                     logger.info(f"Successfully forwarded message {message.id}. Total forwarded: {count}/{limit}")
                     await asyncio.sleep(2)
                 except Exception as e:
-                    preview = (message.text or message.caption or '').replace('\n', ' ')[:60]
+                    preview = (message.text or '').replace('\n', ' ')[:60]
                     media_info = f"photo={is_photo}, video={is_video}, image={is_image}, audio={is_audio}, document={is_document}, text={is_text}, mime={mime}, webpage={is_webpage}"
                     logger.error(f"转发消息失败 | id={message.id} | 预览='{preview}' | 媒体: {media_info} | 错误类型: {type(e).__name__} | 详情: {e}", exc_info=True)
             else:
