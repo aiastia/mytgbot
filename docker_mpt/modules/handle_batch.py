@@ -1,8 +1,8 @@
-
 import logging 
 import asyncio
 from telethon.tl.types import  MessageMediaWebPage
 from modules.check_admin_utils import check_admin
+from modules.offset_utils import is_media_type
 
 logging.basicConfig(
     level=logging.INFO, # 可以暂时设置为 DEBUG 级别以获取更多信息
@@ -50,68 +50,22 @@ async def batch_forward_media(source_chat_id, target_chat_id, limit=50, offset=0
     last_message_id = None  # 新增
     try:
         async for message in client.iter_messages(source_chat_id, offset_id=0, reverse=True):
+            if not is_media_type(message, media_type):
+                continue
             if offset > 0:
                 logger.debug(f"Skipping message {message.id} (offset remaining: {offset})")
                 offset -= 1
                 continue
-            doc = getattr(message.media, 'document', None)
-            mime = doc.mime_type if doc and hasattr(doc, 'mime_type') else None
-            is_photo = message.photo is not None
-            is_video = mime and mime.startswith('video/')
-            is_image = is_photo or (mime and mime.startswith('image/'))
-            is_audio = mime and mime.startswith('audio/')
-            is_document = doc and not (is_image or is_video or is_audio)
-            is_text = doc and (mime == 'text/plain' or (doc and doc.attributes and any(getattr(attr, 'file_name', '').endswith('.txt') for attr in doc.attributes)))
-            # 新增网页预览类型判断
-            is_webpage = message.media is not None and isinstance(message.media, MessageMediaWebPage)
-            # 新增：排除 sticker
-            is_sticker = False
-            if doc and mime:
-                if mime in ('application/x-tgsticker', 'image/webp'):
-                    is_sticker = True
-                if hasattr(doc, 'attributes'):
-                    for attr in doc.attributes:
-                        if attr.__class__.__name__ == 'DocumentAttributeSticker':
-                            is_sticker = True
-            # 新增：排除 gif
-            is_gif = (mime == 'image/gif')
-            should_forward = False
-            if media_type == 'all-txt':
-                should_forward = True
-            elif media_type == 'all':
-                should_forward = message.media is not None and not is_webpage
-            elif media_type in (None, '', 'media'):
-                should_forward = is_image or is_video
-            elif media_type in ('photo', 'image'):
-                should_forward = is_image
-            elif media_type == 'video':
-                should_forward = is_video
-            elif media_type == 'audio':
-                should_forward = is_audio
-            elif media_type == 'document':
-                should_forward = is_document
-            elif media_type == 'text':
-                should_forward = is_text
-            # 这里排除 sticker
-            if is_sticker:
-                should_forward = False
-            # 新增：排除 gif
-            if mime == 'image/gif':
-                should_forward = False
-            if should_forward:
-                try:
-                    logger.info(f"Forwarding message {message.id} (type: {media_type or 'photo+video'}) from {source_chat_id} to {target_chat_id}")
-                    await message.forward_to(target_chat_id)
-                    count += 1
-                    last_message_id = message.id  # 记录最后一条成功转发的消息ID
-                    logger.info(f"Successfully forwarded message {message.id}. Total forwarded: {count}/{limit}")
-                    await asyncio.sleep(2)
-                except Exception as e:
-                    preview = (message.text or '').replace('\n', ' ')[:60]
-                    media_info = f"photo={is_photo}, video={is_video}, image={is_image}, audio={is_audio}, document={is_document}, text={is_text}, mime={mime}, webpage={is_webpage}"
-                    logger.error(f"转发消息失败 | id={message.id} | 预览='{preview}' | 媒体: {media_info} | 错误类型: {type(e).__name__} | 详情: {e}", exc_info=True)
-            else:
-                logger.debug(f"Message {message.id} from {source_chat_id} is not type {media_type or 'photo+video'}, skipping.")
+            try:
+                logger.info(f"Forwarding message {message.id} (type: {media_type or 'photo+video'}) from {source_chat_id} to {target_chat_id}")
+                await message.forward_to(target_chat_id)
+                count += 1
+                last_message_id = message.id  # 记录最后一条成功转发的消息ID
+                logger.info(f"Successfully forwarded message {message.id}. Total forwarded: {count}/{limit}")
+                await asyncio.sleep(2)
+            except Exception as e:
+                preview = (message.text or '').replace('\n', ' ')[:60]
+                logger.error(f"转发消息失败 | id={message.id} | 预览='{preview}' | 错误类型: {type(e).__name__} | 详情: {e}", exc_info=True)
             if count >= limit:
                 logger.info(f"Reached forwarding limit ({limit}). Stopping batch forward.")
                 break

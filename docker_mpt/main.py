@@ -7,7 +7,7 @@ from db.models import Account
 from db.base import SessionLocal
 import asyncio
 from telethon.errors import SessionPasswordNeededError
-from modules.offset_utils import handle_offset_for_id_command
+from modules.offset_utils import handle_offset_for_id_command, is_media_type
 from modules.check_admin_utils import check_admin
 from modules.handle_watch_text import handle_watch_text_command, handle_unwatch_text_command
 from modules.handle_watch_media import handle_watch_media_command, handle_unwatch_media_command

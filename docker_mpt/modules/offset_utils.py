@@ -26,6 +26,50 @@ async def handle_offset_for_id_command(event, client, account_config, account_na
         logger.error(f"Error in handle_offset_for_id_command: {e}", exc_info=True)
         await event.respond(f"获取offset失败: {e}")
 
+def is_media_type(message, media_type=None):
+    """
+    判断消息是否符合指定 media_type 过滤规则，与 batch_forward/offset_for_id 统一
+    """
+    from telethon.tl.types import MessageMediaWebPage
+    doc = getattr(message.media, 'document', None)
+    mime = doc.mime_type if doc and hasattr(doc, 'mime_type') else None
+    is_photo = message.photo is not None
+    is_video = mime and mime.startswith('video/')
+    is_image = is_photo or (mime and mime.startswith('image/'))
+    is_audio = mime and mime.startswith('audio/')
+    is_document = doc and not (is_image or is_video or is_audio)
+    is_text = doc and (mime == 'text/plain' or (doc and doc.attributes and any(getattr(attr, 'file_name', '').endswith('.txt') for attr in doc.attributes)))
+    is_webpage = message.media is not None and isinstance(message.media, MessageMediaWebPage)
+    is_sticker = False
+    if doc and mime:
+        if mime in ('application/x-tgsticker', 'image/webp'):
+            is_sticker = True
+        if hasattr(doc, 'attributes'):
+            for attr in doc.attributes:
+                if attr.__class__.__name__ == 'DocumentAttributeSticker':
+                    is_sticker = True
+    is_gif = (mime == 'image/gif')
+    should_count = False
+    if media_type == 'all-txt':
+        should_count = True
+    elif media_type == 'all':
+        should_count = message.media is not None and not is_webpage
+    elif media_type in (None, '', 'media'):
+        should_count = is_image or is_video
+    elif media_type in ('photo', 'image'):
+        should_count = is_image
+    elif media_type == 'video':
+        should_count = is_video
+    elif media_type == 'audio':
+        should_count = is_audio
+    elif media_type == 'document':
+        should_count = is_document
+    elif media_type == 'text':
+        should_count = is_text
+    if is_sticker or is_gif:
+        should_count = False
+    return should_count
+
 async def offset_for_id(client, chat_id, target_message_id, media_type=None):
     """
     计算某消息id在历史消息中的offset，type同/batch_forward
@@ -38,46 +82,7 @@ async def offset_for_id(client, chat_id, target_message_id, media_type=None):
     offset = 0
     found = False
     async for message in client.iter_messages(chat_id, reverse=True):
-        doc = getattr(message.media, 'document', None)
-        mime = doc.mime_type if doc and hasattr(doc, 'mime_type') else None
-        is_photo = message.photo is not None
-        is_video = mime and mime.startswith('video/')
-        is_image = is_photo or (mime and mime.startswith('image/'))
-        is_audio = mime and mime.startswith('audio/')
-        is_document = doc and not (is_image or is_video or is_audio)
-        is_text = doc and (mime == 'text/plain' or (doc and doc.attributes and any(getattr(attr, 'file_name', '').endswith('.txt') for attr in doc.attributes)))
-        is_webpage = message.media is not None and isinstance(message.media, MessageMediaWebPage)
-        is_sticker = False
-        if doc and mime:
-            if mime in ('application/x-tgsticker', 'image/webp'):
-                is_sticker = True
-            if hasattr(doc, 'attributes'):
-                for attr in doc.attributes:
-                    if attr.__class__.__name__ == 'DocumentAttributeSticker':
-                        is_sticker = True
-        is_gif = (mime == 'image/gif')
-        # 新增：打印消息类别调试信息
-        #print(f"id={message.id} | is_photo={is_photo} | is_video={is_video} | is_image={is_image} | is_audio={is_audio} | is_document={is_document} | is_text={is_text} | is_sticker={is_sticker} | is_gif={is_gif} | is_webpage={is_webpage}")
-        should_count = False
-        if media_type == 'all-txt':
-            should_count = True
-        elif media_type == 'all':
-            should_count = message.media is not None and not is_webpage
-        elif media_type in (None, '', 'media'):
-            should_count = is_image or is_video
-        elif media_type in ('photo', 'image'):
-            should_count = is_image
-        elif media_type == 'video':
-            should_count = is_video
-        elif media_type == 'audio':
-            should_count = is_audio
-        elif media_type == 'document':
-            should_count = is_document
-        elif media_type == 'text':
-            should_count = is_text
-        if is_sticker or is_gif:
-            should_count = False
-        if should_count:
+        if is_media_type(message, media_type):
             if message.id == target_message_id:
                 found = True
                 break
