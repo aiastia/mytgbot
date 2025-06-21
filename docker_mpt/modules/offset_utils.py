@@ -56,6 +56,8 @@ async def offset_for_id(client, chat_id, target_message_id, media_type=None):
                     if attr.__class__.__name__ == 'DocumentAttributeSticker':
                         is_sticker = True
         is_gif = (mime == 'image/gif')
+        # 新增：打印消息类别调试信息
+        #print(f"id={message.id} | is_photo={is_photo} | is_video={is_video} | is_image={is_image} | is_audio={is_audio} | is_document={is_document} | is_text={is_text} | is_sticker={is_sticker} | is_gif={is_gif} | is_webpage={is_webpage}")
         should_count = False
         if media_type == 'all-txt':
             should_count = True
