@@ -13,7 +13,8 @@ from sqlalchemy.sql import select
 import re
 from collections import defaultdict
 import time
-
+from modules.offset_utils import handle_offset_for_id_command
+from modules.check_admin_utils import check_admin
 # Configure logging
 logging.basicConfig(
     level=logging.INFO, # 可以暂时设置为 DEBUG 级别以获取更多信息
@@ -194,6 +195,10 @@ def setup_handlers(client, account_config, account_name, db_account, text_watch_
     @client.on(events.NewMessage(pattern='/unwatch_media'))
     async def _handle_unwatch_media_command(event):
         await handle_unwatch_media_command(event, client, account_config, account_name, text_watch_rules, media_watch_rules)
+    
+    @client.on(events.NewMessage(pattern='/offset_for_id'))
+    async def _handle_offset_for_id_command(event):
+        await handle_offset_for_id_command(event, client, account_config, account_name)
     
     logger.info(f"Event handlers for account {account_name} are now active.")
 
@@ -843,20 +848,7 @@ async def handle_msginfo_command(event, client, account_config, account_name):
         logger.error(f"Error in handle_msginfo_command: {e}", exc_info=True)
         await event.respond(f"获取消息信息失败: {e}")
 
-async def check_admin(event, account_config):
-    """Checks if the sender of the event is an admin (只检查当前账号的 admin_ids，类型统一为 int)"""
-    admin_ids = account_config.get('admin_ids', [])
-    # 统一 admin_ids 为 int 列表
-    admin_ids_int = [int(i) for i in admin_ids]
-    try:
-        sender_id = int(event.sender_id)
-    except Exception:
-        sender_id = event.sender_id
-    if sender_id in admin_ids_int:
-        return True
-    else:
-        await event.respond("您不是管理员，无法使用此命令。")
-        return False
+
 
 async def safe_send_message(target_id, text, client):
     """安全发送消息，自动兼容 int/用户名两种写法，并捕获实体找不到等异常"""
@@ -880,6 +872,8 @@ async def safe_forward_message(message, target_id, client):
         logger.error(f"无法找到目标实体 {target_id}，请确保机器人已与目标建立对话或在群组/频道内。错误: {e}")
     except Exception as e:
         logger.error(f"转发消息到 {target_id} 时出错: {e}")
+
+
 
 async def main():
     logger.info("Starting main bot loop...")
